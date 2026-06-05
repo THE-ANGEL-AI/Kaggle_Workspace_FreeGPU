@@ -12,3 +12,7 @@ req.txt
 
 # Logs
 *.log
+_kaggle_driver.py
+.jbase
+.jkid
+.jcode*
