@@ -15,3 +15,8 @@ req.txt
 
 # Локальные тесты Kaggle (драйвер Jupyter-сервера, токены, временные скрипты)
 _kaggle_tests/
+
+# Блокнот Kaggle
+.ipynb_checkpoints/
+comfyui-flux2.ipynb
+
