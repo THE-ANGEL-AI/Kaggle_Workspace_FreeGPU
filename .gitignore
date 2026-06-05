@@ -12,7 +12,6 @@ req.txt
 
 # Logs
 *.log
-_kaggle_driver.py
-.jbase
-.jkid
-.jcode*
+
+# Локальные тесты Kaggle (драйвер Jupyter-сервера, токены, временные скрипты)
+_kaggle_tests/
