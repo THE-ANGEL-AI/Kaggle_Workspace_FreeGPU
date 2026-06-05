@@ -57,6 +57,7 @@ class ComfyLauncher:
         self.tunnel_proc = None
         self.public_url = None
         self.stopped = False
+        self._starting = False   # идёт ли сейчас запуск (блокирует кнопки)
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -78,13 +79,21 @@ class ComfyLauncher:
         )
         self.stop_btn.on_click(self._on_stop_click)
 
+        self.restart_btn = widgets.Button(
+            description="Перезапустить",
+            icon="refresh",
+            button_style="warning",
+            layout=widgets.Layout(width="180px", height="42px"),
+        )
+        self.restart_btn.on_click(self._on_restart_click)
+
         self.log = widgets.Output(layout=widgets.Layout(
             border="1px solid #ddd", height="360px",
             overflow="auto", padding="6px",
             background_color="#0f1117",
         ))
 
-        buttons = widgets.HBox([self.url_box, self.stop_btn])
+        buttons = widgets.HBox([self.url_box, self.stop_btn, self.restart_btn])
         self.panel = widgets.VBox([
             self.status,
             buttons,
@@ -125,6 +134,9 @@ class ComfyLauncher:
     # Главная последовательность запуска (в фоновом потоке)
     # ------------------------------------------------------------------
     def _startup(self):
+        self._starting = True
+        self.stop_btn.disabled = False
+        self.restart_btn.disabled = True   # нельзя жать «Перезапустить» во время запуска
         try:
             self._cleanup_old()
             self._check_files()
@@ -135,6 +147,9 @@ class ComfyLauncher:
         except Exception as e:
             self._set_status(f"❌ Ошибка запуска: {e}", "#e74c3c")
             self._print(f"[ERROR] {e}")
+        finally:
+            self._starting = False
+            self.restart_btn.disabled = False   # запуск завершён — перезапуск доступен
 
     # --- 1. убиваем старые процессы и чистим блокировки ----------------
     def _cleanup_old(self):
@@ -265,15 +280,9 @@ class ComfyLauncher:
         )
 
     # ------------------------------------------------------------------
-    # Кнопка «Остановить»
+    # Завершение процессов (общее для «Остановить» и «Перезапустить»)
     # ------------------------------------------------------------------
-    def _on_stop_click(self, _btn):
-        if self.stopped:
-            return
-        self.stopped = True
-        self._set_status("⏳ Останавливаю ComfyUI...", "#f39c12")
-        self.stop_btn.disabled = True
-
+    def _kill_processes(self):
         for proc in (self.tunnel_proc, self.comfy_proc):
             if proc and proc.poll() is None:
                 proc.terminate()
@@ -285,10 +294,41 @@ class ComfyLauncher:
         for pat in ("main.py", "cloudflared"):
             subprocess.run(["pkill", "-9", "-f", pat], capture_output=True)
 
+    # ------------------------------------------------------------------
+    # Кнопка «Остановить»
+    # ------------------------------------------------------------------
+    def _on_stop_click(self, _btn):
+        if self.stopped:
+            return
+        self.stopped = True
+        self._set_status("⏳ Останавливаю ComfyUI...", "#f39c12")
+        self.stop_btn.disabled = True
+        self._kill_processes()
         self.url_box.value = "<i style='color:#888'>ComfyUI остановлен.</i>"
-        self._set_status("🛑 ComfyUI остановлен. Можно запустить ячейку заново.",
-                         "#e74c3c")
+        self._set_status("🛑 ComfyUI остановлен. Нажми «Перезапустить» или запусти "
+                         "ячейку заново.", "#e74c3c")
         self._print("[*] ComfyUI и туннель остановлены.")
+
+    # ------------------------------------------------------------------
+    # Кнопка «Перезапустить» — гасит процессы и поднимает ComfyUI заново
+    # (без перезапуска ядра Kaggle и без переустановки)
+    # ------------------------------------------------------------------
+    def _on_restart_click(self, _btn):
+        if self._starting:
+            return                      # уже идёт запуск — игнорируем
+        self.restart_btn.disabled = True
+        self._set_status("🔄 Перезапуск ComfyUI...", "#f39c12")
+        self._print("[*] Перезапуск: гашу старые процессы...")
+        self._kill_processes()
+        # сброс состояния под новый запуск
+        self.stopped = False
+        self.public_url = None
+        self.comfy_proc = None
+        self.tunnel_proc = None
+        self.url_box.value = (
+            "<i style='color:#888'>Публичная ссылка появится здесь...</i>"
+        )
+        Thread(target=self._startup, daemon=True).start()
 
 
 def launch():

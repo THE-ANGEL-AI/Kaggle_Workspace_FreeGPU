@@ -22,6 +22,9 @@ instal_castom_node.py
 import os
 import subprocess
 
+# На Kaggle кэш uv и venv на разных ФС — copy-режим убирает warning про hardlink.
+os.environ.setdefault("UV_LINK_MODE", "copy")
+
 # ----------------------------------------------------------------------
 # Пути
 # ----------------------------------------------------------------------
