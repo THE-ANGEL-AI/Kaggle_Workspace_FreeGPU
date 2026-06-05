@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+
+# ComfyUI / venv
+venv/
+.venv/
+ComfyUI/
+cloudflared
+pinggy.py
+req.txt
+
+# Logs
+*.log
