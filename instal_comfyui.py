@@ -8,7 +8,7 @@ instal_comfyui.py
 Что здесь сделано для СКОРОСТИ и против КОНФЛИКТОВ:
   * venv создаётся через `uv` вместо `virtualenv` — установка пакетов
     в разы быстрее (uv ставит torch и зависимости параллельно).
-  * Python 3.12 — стабильные колёса (wheels) для torch cu128, быстрый
+  * Python 3.12 — стабильные колёса (wheels) для torch cu130, быстрый
     интерпретатор. Берётся управляемый uv-ом CPython (не зависим от
     того, что окажется в образе Kaggle).
   * torch собран под CUDA 13.0 (cu130) — драйвер Kaggle (580.x) его держит,
@@ -17,6 +17,16 @@ instal_comfyui.py
   * xformers НЕ ставим: последние сборки xformers не содержат ядер для
     Turing (T4, compute 7.5) и только тормозят. Быстрое внимание на T4
     даёт нативный PyTorch SDPA — он включается флагом в start.py.
+  * SageAttention СОЗНАТЕЛЬНО НЕ ставим — он несовместим с Turing (T4, sm_75).
+    Проверено на железе (июнь 2026):
+      - v2.2+ из исходников отказывается собираться: setup.py пропускает обе
+        карты ("skipping GPU with compute capability 7.5") и падает с
+        "RuntimeError: No target compute capabilities";
+      - v1.0.6 (Triton, PyPI) ставится, но падает при запуске ядра на sm_75
+        ("RuntimeError: PassManager::run failed").
+    SageAttention требует Ampere (sm_80) или новее. На T4 быстрое внимание =
+    PyTorch SDPA (флаг --use-pytorch-cross-attention в start.py). Если когда-то
+    перейдёшь на sm_80+ GPU — Sage можно будет добавить отдельным шагом.
   * НЕ ставим tensorflow и старые diffusers/transformers — они тянут
     свои версии CUDA/численных библиотек и конфликтуют. Современные
     версии приедут вместе с requirements кастомных нод (шаг 2).
