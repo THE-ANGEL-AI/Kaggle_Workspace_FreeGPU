@@ -11,8 +11,9 @@ instal_comfyui.py
   * Python 3.12 — стабильные колёса (wheels) для torch cu128, быстрый
     интерпретатор. Берётся управляемый uv-ом CPython (не зависим от
     того, что окажется в образе Kaggle).
-  * torch собран под CUDA 12.8 (cu128, стабильный канал) — подходит к
-    драйверу Kaggle и к картам T4.
+  * torch собран под CUDA 13.0 (cu130) — драйвер Kaggle (580.x) его держит,
+    и ComfyUI 0.24 включает на нём оптимизированные CUDA-операции (на cu128
+    был warning и более медленный путь). Проверено на 2× T4.
   * xformers НЕ ставим: последние сборки xformers не содержат ядер для
     Turing (T4, compute 7.5) и только тормозят. Быстрое внимание на T4
     даёт нативный PyTorch SDPA — он включается флагом в start.py.
@@ -41,7 +42,11 @@ VENV_PYTHON  = f"{VENV_DIR}/bin/python"
 COMFY_DIR    = f"{HOME_DIR}/ComfyUI"
 
 PYTHON_VERSION = "3.12"                                  # версия интерпретатора в venv
-TORCH_INDEX    = "https://download.pytorch.org/whl/cu128"  # стабильный канал CUDA 12.8
+# CUDA 13.0: драйвер Kaggle (580.x) его поддерживает, а ComfyUI 0.24 на cu130
+# включает оптимизированные CUDA-операции (на cu128 был warning и медленный путь).
+# Проверено на 2× T4: оба GPU работают, предупреждение исчезает.
+# Если понадобится откат на 12.8 — поставь cu128.
+TORCH_INDEX    = "https://download.pytorch.org/whl/cu130"  # CUDA 13.0 (оптимизированный путь ComfyUI)
 
 COMFYUI_REPO = "https://github.com/Comfy-Org/ComfyUI.git"
 MANAGER_REPO = "https://github.com/ltdrdata/ComfyUI-Manager.git"

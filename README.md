@@ -6,7 +6,7 @@
 
 | Файл | Что делает |
 |------|-----------|
-| `instal_comfyui.py` | Ставит ComfyUI + ComfyUI-Manager через **uv** (быстрее virtualenv). torch под **CUDA 12.8**, Python **3.12**. |
+| `instal_comfyui.py` | Ставит ComfyUI + ComfyUI-Manager через **uv** (быстрее virtualenv). torch под **CUDA 13.0**, Python **3.12**. |
 | `instal_castom_node.py` | Ставит кастомные ноды (Crystools, GGUF, Logic, image-saver, QwenVL, **ComfyUI-MultiGPU/DisTorch2**) и делает symlink на модели. |
 | `start.py` | Запускает ComfyUI + Cloudflare-туннель. Под ячейкой — кнопки **«Открыть ComfyUI»**, **«Остановить ComfyUI»**, **«Перезапустить»** + живой лог. |
 
@@ -23,7 +23,10 @@
 ## Что оптимизировано для скорости на T4
 
 - **uv вместо virtualenv** — установка зависимостей в разы быстрее.
-- **torch cu128 (стабильный)** под драйвер Kaggle и карты T4.
+- **torch cu130 (CUDA 13.0)** — драйвер Kaggle (580.x) его поддерживает, и
+  ComfyUI 0.24 включает на нём оптимизированные CUDA-операции. На cu128 был
+  warning `You need pytorch with cu130 or higher` и более медленный путь.
+  Откат: поменяй `TORCH_INDEX` на `.../whl/cu128` в `instal_comfyui.py`.
 - **Без xformers** — последние сборки не содержат ядер для Turing (T4) и
   только тормозят. Вместо них нативный **PyTorch SDPA**
   (`--use-pytorch-cross-attention`) — быстрое внимание на T4.
