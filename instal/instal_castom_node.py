@@ -51,6 +51,8 @@ CUSTOM_NODES = {
     "ComfyUI-QwenVL":     "https://github.com/1038lab/ComfyUI-QwenVL.git",
     # Официальная мульти-GPU нода (DisTorch2). Заменяет ComfyBootlegOffload.py.
     "ComfyUI-MultiGPU":   "https://github.com/pollockjj/ComfyUI-MultiGPU.git",
+    # KJNodes — большой набор утилитарных нод (маски, латенты, пайплайны и т.д.).
+    "ComfyUI-KJNodes":    "https://github.com/kijai/ComfyUI-KJNodes.git",
 }
 
 # ----------------------------------------------------------------------

@@ -58,6 +58,12 @@ VENV_DIR     = f"{HOME_DIR}/venv"
 VENV_PYTHON  = f"{VENV_DIR}/bin/python"
 COMFY_DIR    = f"{HOME_DIR}/ComfyUI"
 
+# Управляемый uv-ом CPython кладём в /kaggle/working (переживает рестарт сессии),
+# а НЕ в ~/.local (НЕ переживает). Иначе симлинк venv/bin/python после каждого
+# рестарта становится битым → torch приходится ставить заново каждый раз.
+# Теперь и venv, и его базовый python персистентны — venv выживает между сессиями.
+os.environ.setdefault("UV_PYTHON_INSTALL_DIR", f"{HOME_DIR}/uv-python")
+
 PYTHON_VERSION = "3.12"                                  # версия интерпретатора в venv
 # CUDA 13.0: драйвер Kaggle (580.x) его поддерживает, а ComfyUI 0.24 на cu130
 # включает оптимизированные CUDA-операции (на cu128 был warning и медленный путь).
