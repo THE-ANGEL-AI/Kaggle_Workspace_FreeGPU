@@ -16,9 +16,10 @@ req.txt
 # Локальные тесты Kaggle (драйвер Jupyter-сервера, токены, временные скрипты)
 _kaggle_tests/
 
-# Блокнот Kaggle
+# Блокнот и рабочие процессы (воркфлоу) — только локально, не на GitHub
 .ipynb_checkpoints/
 comfyui-flux2.ipynb
+Flux2dev32b_GGUF.json
 
 # Локальная память проекта (заметки/решения, не для GitHub)
 PROJECT_MEMORY.md
