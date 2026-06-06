@@ -31,17 +31,24 @@ instal_comfyui.py
     свои версии CUDA/численных библиотек и конфликтуют. Современные
     версии приедут вместе с requirements кастомных нод (шаг 2).
 
-Запуск (в блокноте):  !python instal_comfyui.py
+Запуск (в блокноте):  !python instal/instal_comfyui.py
+
+Скрипт ИДЕМПОТЕНТЕН: каждый шаг сначала проверяет, не сделан ли он уже
+(uv установлен? venv цел? torch с CUDA на месте? репозитории склонированы?),
+и пропускает лишнюю работу. Можно безопасно перезапускать.
 =================================================================
 """
 
 import os
+import shutil
 import subprocess
 import sys
 
 # На Kaggle кэш uv и venv на разных ФС — hardlink не работает, uv ругается.
 # copy-режим убирает предупреждение и лишние попытки слинковать.
 os.environ.setdefault("UV_LINK_MODE", "copy")
+# uv не должен задавать интерактивных вопросов (в блокноте отвечать некому).
+os.environ.setdefault("UV_NO_PROMPT", "1")
 
 # ----------------------------------------------------------------------
 # Пути и параметры. Меняй здесь, если нужно другое окружение.
@@ -90,40 +97,108 @@ def uv_pip_install(*packages, extra_args=None):
     run(cmd)
 
 
+def venv_python_ok():
+    """venv считается рабочим, только если его python РЕАЛЬНО запускается.
+
+    На Kaggle папка /kaggle/working/venv переживает рестарт сессии, а вот
+    управляемый uv-ом CPython, на который ссылается venv/bin/python, лежит
+    в кэше (~/.local, ~/.cache) и НЕ переживает. Симлинк становится битым:
+    os.path.exists по нему вернёт False, но даже если файл на месте — он
+    может не запускаться. Поэтому проверяем именно запуском.
+    """
+    if not os.path.exists(VENV_PYTHON):
+        return False
+    try:
+        subprocess.run([VENV_PYTHON, "-c", "pass"],
+                       check=True, capture_output=True, timeout=30)
+        return True
+    except (subprocess.SubprocessError, OSError):
+        return False
+
+
+def torch_cuda_ok():
+    """torch уже стоит в venv и видит CUDA? Тогда переустановка не нужна."""
+    if not venv_python_ok():
+        return False
+    try:
+        subprocess.run(
+            [VENV_PYTHON, "-c", "import torch; assert torch.cuda.is_available()"],
+            check=True, capture_output=True, timeout=120)
+        return True
+    except (subprocess.SubprocessError, OSError):
+        return False
+
+
 # ----------------------------------------------------------------------
 # 1. Системные пакеты (ffmpeg для нод с видео/превью).
 # ----------------------------------------------------------------------
 def install_system_packages():
     step("Системные пакеты (ffmpeg)")
+    if shutil.which("ffmpeg"):
+        log("ffmpeg уже установлен (пропуск apt)")
+        return
     run("apt-get update -qq", check=False)
     run("apt-get install -y -qq ffmpeg", check=False)
 
 
 # ----------------------------------------------------------------------
-# 2. Ставим uv и создаём venv нужной версии Python.
+# 2. Ставим uv (если ещё нет) и создаём venv нужной версии Python.
 # ----------------------------------------------------------------------
-def setup_uv_venv():
-    step("Установка uv и создание venv")
-    run([sys.executable, "-m", "pip", "install", "-q", "-U", "uv"])
-
-    if os.path.exists(VENV_PYTHON):
-        log(f"venv уже существует: {VENV_DIR} (пересоздание пропущено)")
+def ensure_uv():
+    """Ставим uv, только если его ещё нет. Без лишних переустановок."""
+    if shutil.which("uv"):
+        log("uv уже установлен (пропуск)")
         return
 
+    step("Установка uv")
+    # На свежих образах системный python «externally managed» (PEP 668) и
+    # pip без флага падает. Сначала пробуем обычно, при ошибке — с флагом.
+    base = [sys.executable, "-m", "pip", "install", "-q", "-U", "uv"]
+    if run(base, check=False).returncode != 0:
+        warn("pip отказал (externally-managed?), пробую --break-system-packages")
+        run(base + ["--break-system-packages"], check=False)
+
+    if not shutil.which("uv"):
+        # uv мог встать в каталог, которого нет в PATH (~/.local/bin).
+        local_bin = os.path.expanduser("~/.local/bin")
+        if os.path.exists(os.path.join(local_bin, "uv")):
+            os.environ["PATH"] = local_bin + os.pathsep + os.environ.get("PATH", "")
+    if not shutil.which("uv"):
+        raise RuntimeError("Не удалось установить uv — проверь лог выше")
+    log("uv установлен")
+
+
+def setup_uv_venv():
+    ensure_uv()
+
+    step("Создание venv")
+    if venv_python_ok():
+        log(f"venv уже существует и рабочий: {VENV_DIR} (пересоздание пропущено)")
+        return
+
+    if os.path.exists(VENV_DIR):
+        # Папка есть, но python не запускается (битый симлинк после рестарта
+        # сессии). Создаём заново поверх с --clear, без интерактивных вопросов.
+        warn(f"venv найден, но нерабочий — пересоздаю: {VENV_DIR}")
+
     # --seed кладёт pip/setuptools внутрь venv — некоторым нодам это нужно.
-    run(["uv", "venv", VENV_DIR, "--python", PYTHON_VERSION, "--seed"])
+    # --clear молча перезаписывает существующую папку (без вопроса «очистить?»).
+    run(["uv", "venv", VENV_DIR, "--python", PYTHON_VERSION, "--seed", "--clear"])
     log(f"venv создан на Python {PYTHON_VERSION}: {VENV_DIR}")
 
 
 # ----------------------------------------------------------------------
-# 3. PyTorch под CUDA 12.8 (главное для скорости генерации).
+# 3. PyTorch под CUDA 13.0 (главное для скорости генерации).
 # ----------------------------------------------------------------------
 def install_torch():
-    step("PyTorch для CUDA 12.8 (cu128)")
-    uv_pip_install(
-        "torch", "torchvision", "torchaudio",
-        extra_args=["--index-url", TORCH_INDEX],
-    )
+    step("PyTorch для CUDA 13.0 (cu130)")
+    if torch_cuda_ok():
+        log("torch с рабочей CUDA уже установлен (переустановка пропущена)")
+    else:
+        uv_pip_install(
+            "torch", "torchvision", "torchaudio",
+            extra_args=["--index-url", TORCH_INDEX],
+        )
 
     # Проверяем, что torch видит CUDA — сразу ловим проблему, не на запуске.
     run([VENV_PYTHON, "-c",
@@ -185,7 +260,7 @@ def install_common_extras():
 
 
 def main():
-    step("ШАГ 1: установка ComfyUI и Manager (uv + torch cu128)")
+    step("ШАГ 1: установка ComfyUI и Manager (uv + torch cu130)")
     os.chdir(HOME_DIR)
 
     install_system_packages()
@@ -195,7 +270,7 @@ def main():
     install_manager()
     install_common_extras()
 
-    log("ГОТОВО. ComfyUI установлен. Теперь запусти: !python instal_castom_node.py")
+    log("ГОТОВО. ComfyUI установлен. Теперь запусти: !python instal/instal_castom_node.py")
 
 
 if __name__ == "__main__":

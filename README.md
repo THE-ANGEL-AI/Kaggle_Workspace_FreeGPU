@@ -1,24 +1,55 @@
 # ComfyUI Flux2 на Kaggle (2× T4)
 
-Блокнот `comfyui-flux2.ipynb` сведён к **трём строкам запуска**. Вся логика — в трёх Python-скриптах.
+Блокнот `comfyui-flux2.ipynb` сведён к **трём строкам запуска**. Вся логика — в трёх Python-скриптах внутри папки `instal/`.
 
 ## Структура
 
+```
+Kaggle_Cloud/
+├─ comfyui-flux2.ipynb     # блокнот в 3 строки запуска
+├─ instal/                 # все установочные скрипты (папка расширяется)
+│  ├─ instal_comfyui.py
+│  ├─ instal_castom_node.py
+│  └─ start.py
+└─ README.md
+```
+
 | Файл | Что делает |
 |------|-----------|
-| `instal_comfyui.py` | Ставит ComfyUI + ComfyUI-Manager через **uv** (быстрее virtualenv). torch под **CUDA 13.0**, Python **3.12**. |
-| `instal_castom_node.py` | Ставит кастомные ноды (Crystools, GGUF, Logic, image-saver, QwenVL, **ComfyUI-MultiGPU/DisTorch2**) и делает symlink на модели. |
-| `start.py` | Запускает ComfyUI + Cloudflare-туннель. Под ячейкой — кнопки **«Открыть ComfyUI»**, **«Остановить ComfyUI»**, **«Перезапустить»** + живой лог. |
+| `instal/instal_comfyui.py` | Ставит ComfyUI + ComfyUI-Manager через **uv** (быстрее virtualenv). torch под **CUDA 13.0**, Python **3.12**. |
+| `instal/instal_castom_node.py` | Ставит кастомные ноды (Crystools, GGUF, Logic, image-saver, QwenVL, **ComfyUI-MultiGPU/DisTorch2**) и делает symlink на модели. |
+| `instal/start.py` | Запускает ComfyUI + Cloudflare-туннель. Под ячейкой — кнопки **«Открыть ComfyUI»**, **«Остановить ComfyUI»**, **«Перезапустить»** + живой лог. |
 
 ## Запуск
 
-Положи 3 `.py` рядом с блокнотом в `/kaggle/working`, затем выполни ячейки:
+Положи папку `instal/` рядом с блокнотом в `/kaggle/working`, затем выполни ячейки:
 
 ```python
-!python instal_comfyui.py
-!python instal_castom_node.py
-%run start.py
+!python instal/instal_comfyui.py
+!python instal/instal_castom_node.py
+%run instal/start.py
 ```
+
+## Проверки и идемпотентность
+
+Скрипты можно безопасно перезапускать — каждый шаг сначала проверяет, не сделан ли он:
+
+- **`instal_comfyui.py`** — ставит `uv` только если его нет (`shutil.which`), при ошибке
+  PEP 668 (`externally-managed-environment`) повторяет с `--break-system-packages`;
+  не пересоздаёт рабочий venv; не переустанавливает torch, если CUDA уже видна;
+  пропускает `apt` если `ffmpeg` уже стоит.
+- **`instal_castom_node.py`** — перед работой проверяет, что ШАГ 1 выполнен (есть `uv`,
+  рабочий venv, папка `custom_nodes`), иначе выходит с подсказкой.
+- **`start.py`** — проверяет venv **запуском** (а не наличием файла). Если venv пропал
+  или стал нерабочим (битый симлинк после рестарта сессии Kaggle) — **автоматически
+  перезапускает `instal_comfyui.py`**, пересоздаёт venv и переустанавливает torch.
+
+### Почему venv «теряется» (важно)
+
+Папка `/kaggle/working/venv` переживает рестарт сессии, но управляемый `uv`-ом
+CPython, на который ссылается `venv/bin/python`, лежит в кэше (`~/.cache`) и **не**
+переживает. Симлинк становится битым → ComfyUI не стартует. Поэтому `start.py`
+проверяет venv реальным запуском и при поломке чинит его сам.
 
 ## Что оптимизировано для скорости на T4
 
@@ -47,9 +78,10 @@
 
 ## Где править под себя
 
-- Список нод — `CUSTOM_NODES` в `instal_castom_node.py`.
-- Ссылки на модели — `SYMLINKS` в `instal_castom_node.py`.
-- Версия Python / канал torch — константы вверху `instal_comfyui.py`.
+- Список нод — `CUSTOM_NODES` в `instal/instal_castom_node.py`.
+- Ссылки на модели — `SYMLINKS` в `instal/instal_castom_node.py`.
+- Версия Python / канал torch — константы вверху `instal/instal_comfyui.py`
+  (откат на CUDA 12.8: поменяй `TORCH_INDEX` на `.../whl/cu128`).
 
 ## Мульти-GPU (2× T4)
 

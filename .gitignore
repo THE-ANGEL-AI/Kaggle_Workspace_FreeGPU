@@ -20,3 +20,6 @@ _kaggle_tests/
 .ipynb_checkpoints/
 comfyui-flux2.ipynb
 
+# Локальная память проекта (заметки/решения, не для GitHub)
+PROJECT_MEMORY.md
+

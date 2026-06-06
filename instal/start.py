@@ -23,7 +23,11 @@ start.py
   * smart-memory НЕ отключаем — модель кэшируется в VRAM между
     генерациями, повторный прогон быстрее.
 
-Запуск (в блокноте):  %run start.py
+Запуск (в блокноте):  %run instal/start.py
+
+Перед стартом проверяет окружение. Если venv пропал или стал нерабочим
+(битый симлинк после рестарта сессии Kaggle) — АВТОМАТИЧЕСКИ перезапускает
+instal_comfyui.py, чтобы пересоздать venv и переустановить torch.
 =================================================================
 """
 
@@ -31,6 +35,7 @@ import os
 import re
 import socket
 import subprocess
+import sys
 import time
 from threading import Thread
 
@@ -47,6 +52,14 @@ CLOUDFLARED = f"{HOME_DIR}/cloudflared"
 PORT        = 8188
 STARTUP_TIMEOUT = 240   # сек на запуск ComfyUI
 URL_TIMEOUT     = 90    # сек на получение ссылки Cloudflare
+
+# Путь к установщику ШАГА 1 — берём рядом с этим файлом, не завися от cwd.
+# (При `%run instal/start.py` __file__ указывает на instal/start.py.)
+try:
+    _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+except NameError:                       # на всякий случай, если __file__ не задан
+    _THIS_DIR = os.path.join(HOME_DIR, "instal")
+INSTALLER = os.path.join(_THIS_DIR, "instal_comfyui.py")
 
 
 class ComfyLauncher:
@@ -166,15 +179,64 @@ class ComfyLauncher:
                 pass
 
     # --- 2. проверки файлов -------------------------------------------
+    def _venv_python_ok(self):
+        """venv цел только если его python реально запускается.
+
+        /kaggle/working/venv переживает рестарт сессии, а управляемый uv-ом
+        CPython, на который он ссылается, — нет. Симлинк становится битым,
+        поэтому проверяем именно запуском, а не os.path.exists.
+        """
+        if not os.path.exists(VENV_PYTHON):
+            return False
+        try:
+            subprocess.run([VENV_PYTHON, "-c", "pass"],
+                           check=True, capture_output=True, timeout=30)
+            return True
+        except (subprocess.SubprocessError, OSError):
+            return False
+
+    def _run_installer(self):
+        """Запускает instal_comfyui.py (пересоздаёт venv, ставит torch)."""
+        if not os.path.exists(INSTALLER):
+            raise RuntimeError(
+                f"venv нерабочий, а установщик не найден: {INSTALLER}. "
+                "Запусти вручную: !python instal/instal_comfyui.py"
+            )
+        self._print(f"[*] Запускаю установщик: {INSTALLER}")
+        proc = subprocess.Popen(
+            [sys.executable, INSTALLER],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1,
+        )
+        for line in iter(proc.stdout.readline, ""):
+            if line:
+                self._print(f"[INSTALL] {line.rstrip()}")
+            if proc.poll() is not None and not line:
+                break
+        proc.wait()
+        if proc.returncode != 0:
+            raise RuntimeError(f"Установщик завершился с кодом {proc.returncode}")
+
     def _check_files(self):
+        # venv пропал или битый (типично после рестарта сессии Kaggle) —
+        # автоматически пересоздаём через установщик ШАГА 1.
+        if not self._venv_python_ok():
+            self._set_status("⚙️ venv не найден/нерабочий — переустанавливаю...",
+                             "#f39c12")
+            self._print("[!] venv не найден или нерабочий — авто-переустановка")
+            self._run_installer()
+            if not self._venv_python_ok():
+                raise RuntimeError(
+                    "venv так и не заработал после установщика — смотри лог выше"
+                )
+
         for path, msg in (
-            (COMFY_DIR, "ComfyUI не найден — запусти instal_comfyui.py"),
+            (COMFY_DIR, "ComfyUI не найден — запусти instal/instal_comfyui.py"),
             (f"{COMFY_DIR}/main.py", "main.py не найден"),
-            (VENV_PYTHON, "venv не найден — запусти instal_comfyui.py"),
         ):
             if not os.path.exists(path):
                 raise RuntimeError(msg)
-        self._print("[*] Файлы ComfyUI на месте")
+        self._print("[*] Файлы ComfyUI и рабочий venv на месте")
 
     # --- 3. cloudflared ------------------------------------------------
     def _ensure_cloudflared(self):

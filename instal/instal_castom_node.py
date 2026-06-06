@@ -15,15 +15,21 @@ instal_castom_node.py
 Список нод и список ссылок на модели вынесены наверх — правь их там,
 ты добавляешь модели и ноды вручную.
 
-Запуск (в блокноте):  !python instal_castom_node.py
+Запуск (в блокноте):  !python instal/instal_castom_node.py
+
+Перед работой скрипт проверяет, что ШАГ 1 выполнен (есть uv, рабочий venv
+и папка ComfyUI/custom_nodes). Если нет — выходит с понятной подсказкой.
 =================================================================
 """
 
 import os
+import shutil
 import subprocess
 
 # На Kaggle кэш uv и venv на разных ФС — copy-режим убирает warning про hardlink.
 os.environ.setdefault("UV_LINK_MODE", "copy")
+# uv не должен задавать интерактивных вопросов (в блокноте отвечать некому).
+os.environ.setdefault("UV_NO_PROMPT", "1")
 
 # ----------------------------------------------------------------------
 # Пути
@@ -83,6 +89,38 @@ def uv_pip_install_req(req_path):
     run(["uv", "pip", "install", "--python", VENV_PYTHON, "-r", req_path], check=False)
 
 
+def venv_python_ok():
+    """venv цел только если его python реально запускается (см. instal_comfyui.py)."""
+    if not os.path.exists(VENV_PYTHON):
+        return False
+    try:
+        subprocess.run([VENV_PYTHON, "-c", "pass"],
+                       check=True, capture_output=True, timeout=30)
+        return True
+    except (subprocess.SubprocessError, OSError):
+        return False
+
+
+def check_prerequisites():
+    """Проверяем, что ШАГ 1 выполнен: есть uv, рабочий venv и custom_nodes."""
+    step("Проверка окружения (результат ШАГА 1)")
+    if not shutil.which("uv"):
+        raise RuntimeError(
+            "uv не найден. Сначала запусти: !python instal/instal_comfyui.py"
+        )
+    if not venv_python_ok():
+        raise RuntimeError(
+            "venv не найден или нерабочий (битый после рестарта сессии). "
+            "Перезапусти: !python instal/instal_comfyui.py"
+        )
+    if not os.path.exists(NODES_DIR):
+        raise RuntimeError(
+            f"Не найдена папка {NODES_DIR}. "
+            "Сначала запусти: !python instal/instal_comfyui.py"
+        )
+    log("Окружение готово: uv, venv и ComfyUI на месте")
+
+
 # ----------------------------------------------------------------------
 # Установка одной ноды: clone (или pull) + её requirements.
 # ----------------------------------------------------------------------
@@ -116,10 +154,7 @@ def make_symlink(src, dst):
 def main():
     step("ШАГ 2: кастомные ноды + ссылки на модели")
 
-    if not os.path.exists(NODES_DIR):
-        raise RuntimeError(
-            f"Не найдена папка {NODES_DIR}. Сначала запусти instal_comfyui.py"
-        )
+    check_prerequisites()
 
     step("Установка кастомных нод")
     for name, repo in CUSTOM_NODES.items():
@@ -129,7 +164,7 @@ def main():
     for src, dst in SYMLINKS:
         make_symlink(src, dst)
 
-    log("ГОТОВО. Ноды и модели на месте. Теперь запусти start.py")
+    log("ГОТОВО. Ноды и модели на месте. Теперь запусти: %run instal/start.py")
 
 
 if __name__ == "__main__":
