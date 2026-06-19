@@ -1,0 +1,5 @@
+AGENTS.md
+__pycache__/
+.env
+.env.*
+docs/
