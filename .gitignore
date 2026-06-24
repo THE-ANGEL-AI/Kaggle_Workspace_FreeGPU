@@ -68,3 +68,9 @@ instal/*
 !instal/kaggle_env.py
 !instal/start.py
 !instal/.gitignore
+
+# --- Локальные state-файлы Jupyter-style tooling (не для GitHub) ---
+# Создаются рядом с блокнотами на машине пользователя. Явное перечисление
+# (а не `.*`) — чтобы случайно не скрыть .env / .gitattributes / .nojekyll.
+.jbase
+.jkid
