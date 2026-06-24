@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🔮 THE ANGEL AI — крутейший стартап 1996</title>
+  <meta name="description" content="90s mode: ретро-версия сайта в стиле Web 1996. Пасхалочка проекта Kaggle_Workspace_FreeGPU.">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9A%80%3C/text%3E%3C/svg%3E">
+
+  <!-- Локальные стили: ретро-палитра полностью перекрывает дизайн-систему основного сайта.
+       Это пасхалка: страница намеренно UGLY и NOSTALGIC, в стиле Web 1996. -->
+  <style>
+    /* Reset to 1996 */
+    html, body {
+      margin: 0; padding: 0;
+      background: #000080; /* Windows 95 desktop blue */
+      color: #FFFF00;
+      font-family: "Times New Roman", "Comic Sans MS", serif;
+      font-size: 14px;
+    }
+
+    /* Tiled stars background (через repeating-radial-gradient — без asset-файлов) */
+    body {
+      background:
+        repeating-radial-gradient(circle at 12% 30%, #FFFFFF 0 1px, transparent 2px 14px),
+        repeating-radial-gradient(circle at 70% 60%, #FFFFFF 0 1px, transparent 2px 22px),
+        repeating-radial-gradient(circle at 40% 80%, #FFFFFF 0 1px, transparent 2px 18px),
+        #000080;
+    }
+
+    .skip-link {
+      background: #FFFF00;
+      color: #000080;
+      font-family: Arial, sans-serif;
+    }
+
+    /* Не показываем top nav, scanlines и cyberpunk-эффекты основного сайта */
+    .nav, .bg-grid { display: none !important; }
+    body::before, body::after { display: none !important; }
+
+    /* Marquee */
+    .marquee {
+      background: #800000;
+      color: #FFFF00;
+      font-family: Arial, sans-serif;
+      font-weight: 900;
+      font-size: 18px;
+      padding: 6px 0;
+      border-top: 3px ridge #FFFF00;
+      border-bottom: 3px ridge #FFFF00;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+    .marquee-track {
+      display: inline-block;
+      padding-left: 100%;
+      animation: marquee-scroll 22s linear infinite;
+    }
+    @keyframes marquee-scroll {
+      0% { transform: translateX(0); }
+      100% { transform: translateX(-100%); }
+    }
+
+    /* Center layout, classic 800px feel */
+    .vintage-frame {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 24px 16px 32px;
+    }
+    .panel {
+      background: #C0C0C0;
+      color: #000000;
+      border: 4px ridge #404040;
+      padding: 14px 18px;
+      margin-bottom: 22px;
+      font-family: "Times New Roman", serif;
+    }
+    .panel.alt { background: #FFFFFF; }
+    .panel.inverse { background: #000000; color: #00FF00; font-family: "Courier New", monospace; }
+
+    /* Title with neon outline (1996 best-effort neon) */
+    .title {
+      font-family: "Impact", "Arial Black", sans-serif;
+      font-size: 48px;
+      text-align: center;
+      color: #FFFF00;
+      text-shadow:
+        2px 2px 0 #FF0000,
+        -1px -1px 0 #FF00FF;
+      margin: 8px 0 14px;
+      letter-spacing: 2px;
+    }
+    .subtitle {
+      text-align: center;
+      font-family: "Comic Sans MS", cursive;
+      font-size: 18px;
+      color: #FFFFFF;
+      margin-bottom: 18px;
+    }
+
+    /* Visitor counter */
+    .counter {
+      text-align: center;
+      margin: 14px 0 22px;
+      font-family: "Courier New", monospace;
+    }
+    .counter-label {
+      color: #FFFFFF;
+      font-size: 12px;
+      letter-spacing: 1px;
+    }
+    .counter-digits {
+      display: inline-block;
+      background: #000000;
+      color: #00FF00;
+      font-size: 24px;
+      font-weight: 700;
+      padding: 6px 10px;
+      border: 3px ridge #00FF00;
+      letter-spacing: 4px;
+    }
+
+    /* Blinking text */
+    .blink {
+      animation: blink-1996 1s steps(2) infinite;
+    }
+    @keyframes blink-1996 { 50% { opacity: 0; } }
+
+    /* Classic buttons: chunky 3D bevel */
+    .btn90 {
+      display: inline-block;
+      background: #C0C0C0;
+      color: #000000;
+      border: 3px outset #FFFFFF;
+      padding: 8px 16px;
+      font-family: "Times New Roman", serif;
+      font-size: 14px;
+      font-weight: 700;
+      text-decoration: none;
+      cursor: pointer;
+      margin: 4px;
+    }
+    .btn90:active { border-style: inset; }
+    .btn90:hover { background: #FFFF00; color: #000000; }
+
+    /* Under construction stripe */
+    .uc-stripe {
+      background: repeating-linear-gradient(
+        45deg,
+        #FFFF00 0 14px,
+        #000000 14px 28px
+      );
+      height: 16px;
+      margin: 16px 0;
+      border-top: 2px solid #000000;
+      border-bottom: 2px solid #000000;
+    }
+
+    /* Lists and links */
+    ul.dotted { list-style: square; padding-left: 22px; }
+    ul.dotted li { margin: 4px 0; }
+    a:link { color: #0000EE; }
+    a:visited { color: #551A8B; }
+    a:hover { background: #FFFF00; color: #000000; }
+
+    /* Marquee multi-row */
+    .marquee.thin { background: #008000; border-color: #FFFF00; }
+    .marquee.thin .marquee-track { animation-duration: 18s; font-size: 14px; }
+
+    hr.dashed {
+      border: none;
+      border-top: 2px dashed #FF00FF;
+      margin: 18px 0;
+    }
+
+    /* "Hit counter" footer */
+    .footer90 {
+      text-align: center;
+      margin-top: 20px;
+      font-family: "Courier New", monospace;
+      font-size: 11px;
+      color: #C0C0C0;
+    }
+    .footer90 a { color: #FFFF00; }
+
+    /* Tip: meta viewport уже подключён выше — НЕ переопределяем его */
+
+    @media (prefers-reduced-motion: reduce) {
+      .marquee-track { animation: none; }
+      .blink { animation: none; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">К содержимому</a>
+
+  <div class="marquee">
+    <div class="marquee-track">
+      ★ ★ ★  ДОБРО ПОЖАЛОВАТЬ В ЛУЧШИЙ САЙТ ПРО COMFYUI НА T4  ★ ★ ★  ВСЁ БЕСПЛАТНО  ★ ★ ★  100% NO BULLSHIT  ★ ★ ★  СДЕЛАНО В ГАРАЖЕ  ★ ★ ★ &nbsp;&nbsp;&nbsp;
+    </div>
+  </div>
+
+  <main id="main" class="vintage-frame">
+    <h1 class="title">THE&nbsp;ANGEL&nbsp;AI</h1>
+    <p class="subtitle blink">★ UNDER CONSTRUCTION (с 2024 года, извините) ★</p>
+
+    <div class="counter" aria-label="Счётчик посетителей">
+      <div class="counter-label">YOU ARE VISITOR NUMBER</div>
+      <div class="counter-digits">0000001337</div>
+    </div>
+
+    <div class="panel">
+      <h2>🔥 Чё тут вообще такое?</h2>
+      <p>
+        Привет, юзер 1996 года! Этот сайт рассказывает про <b>Kaggle_Workspace_FreeGPU</b> —
+        проект, который запускает <i>ComfyUI</i> (это такая прога с картинками и видео)
+        на <b>двух бесплатных Tesla T4</b> прямо в облаке Kaggle.
+      </p>
+      <p>
+        Без своего GPU. Без оплаты. Никаких костылей — идемпотентные скрипты,
+        самовосстановление окружения, публичный URL прямо из ячейки блокнота.
+      </p>
+    </div>
+
+    <div class="uc-stripe" aria-hidden="true"></div>
+
+    <div class="panel alt">
+      <h2>📂 ФАЙЛЫ РЕПОЗИТОРИЯ</h2>
+      <ul class="dotted">
+        <li><a href="https://github.com/THE-ANGEL-AI/Kaggle_Workspace_FreeGPU/tree/main/instal">instal/</a> — четыре Python-скрипта, всё идемпотентно.</li>
+        <li><a href="https://github.com/THE-ANGEL-AI/Kaggle_Workspace_FreeGPU/tree/main/workflows">workflows/</a> — готовые графы (Flux2 GGUF, LTX 2.3).</li>
+        <li><a href="https://github.com/THE-ANGEL-AI/Kaggle_Workspace_FreeGPU/tree/main/Notebook">Notebook/</a> — готовые .ipynb для Kaggle.</li>
+        <li><a href="https://github.com/THE-ANGEL-AI/Kaggle_Workspace_FreeGPU/blob/main/README.md">README.md</a> — полная инструкция по запуску.</li>
+      </ul>
+    </div>
+
+    <hr class="dashed">
+
+    <div class="panel inverse">
+      <h2>&gt; СИСТЕМНЫЕ ТРЕБОВАНИЯ</h2>
+      <pre style="font-family:inherit; margin:0">
+&gt; GPU:  2x NVIDIA Tesla T4 (16 GB each)
+&gt; RAM:  29 GB host memory
+&gt; DISK: 100 GB NVMe workspace
+&gt; NET:  open internet (для cloudflared туннеля)
+&gt; TIME: ~30 часов в неделю (Kaggle free tier, считай с запасом)</pre>
+    </div>
+
+    <div class="marquee thin">
+      <div class="marquee-track">
+        📧 Email: theangel@vk.com &nbsp;&nbsp;|&nbsp;&nbsp; 💖 Boosty: boosty.to/the_angel &nbsp;&nbsp;|&nbsp;&nbsp; 🌐 VK: vk.com/theangel_lab &nbsp;&nbsp;|&nbsp;&nbsp; 📦 GitHub: THE-ANGEL-AI/Kaggle_Workspace_FreeGPU &nbsp;&nbsp;&nbsp;
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>🎮 ЧТО ДЕЛАТЬ?</h2>
+      <p style="text-align:center">
+        <a class="btn90" href="index.html">НА ГЛАВНУЮ →</a>
+        <a class="btn90" href="news.html">📰 НОВОСТИ</a>
+        <a class="btn90" href="https://github.com/THE-ANGEL-AI/Kaggle_Workspace_FreeGPU">💾 СКАЧАТЬ СКРИПТЫ</a>
+        <a class="btn90" href="https://boosty.to/the_angel/donate">💖 ПОДДЕРЖАТЬ</a>
+      </p>
+      <p class="blink" style="text-align:center; color:#FFFF00; margin-top:14px">
+        ⏳ ЖМИТЕ КНОПКИ. ОНИ ВСЁ ЕЩЁ РАБОТАЮТ.
+      </p>
+    </div>
+
+    <hr class="dashed">
+
+    <div class="panel alt">
+      <h3>📜 ЛИЦЕНЗИЯ</h3>
+      <p>MIT. Берите, копируйте, форкайте. Только указывайте автора — мы старались.</p>
+    </div>
+
+    <div class="footer90">
+      <p>
+        © 2024-2026 THE ANGEL AI · Сделано на совесть с любовью к GPU ·
+        Best viewed with Netscape Navigator 4.0+ or Internet Explorer 5.5+ at 1024×768
+      </p>
+      <p>
+        🏆 <a href="index.html">← Вернуться в 2026 (киберпанк-режим)</a>
+      </p>
+    </div>
+  </main>
+</body>
+</html>
