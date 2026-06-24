@@ -222,20 +222,116 @@ code {
 .nav-links a.is-active::after { transform: scaleX(1); }
 
 /* ------------------------------------------------------------
-   6. Hero
+   6. Hero — split layout (text + character mascot)
    ------------------------------------------------------------ */
 .hero {
   position: relative;
   z-index: 2;
-  padding: 7rem 2rem 6.5rem;
+  padding: 5rem 2rem 6.5rem;
   text-align: center;
   overflow: hidden;
+}
+
+/* 2-column grid: text on the left, character mascot on the right.
+   Heroes are still visually balanced because each column holds its
+   own inner content (text block / figure). Centered text alignment
+   stays as default because the text column is narrower than figure. */
+.hero-grid {
+  position: relative;
+  z-index: 2;
+  max-width: 1240px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  align-items: center;
+  gap: clamp(2rem, 5vw, 4.5rem);
+  text-align: left;
 }
 .hero-inner {
   position: relative;
   z-index: 2;
-  max-width: 980px;
-  margin: 0 auto;
+}
+
+/* Character figure (right column) */
+.hero-figure {
+  position: relative;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  isolation: isolate;
+}
+
+/* Glow halo behind the character.
+   Built from 3 stacked radial-gradients (cyan + magenta + violet)
+   so the glow has depth, not just a single flat color. */
+.hero-character-glow {
+  position: absolute;
+  inset: -8% -10% -8% -10%;
+  z-index: -1;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(0, 240, 255, 0.42) 0%, transparent 50%),
+    radial-gradient(circle at 70% 60%, rgba(255, 0, 60, 0.32) 0%, transparent 55%),
+    radial-gradient(circle at 50% 90%, rgba(176, 38, 255, 0.28) 0%, transparent 60%);
+  filter: blur(28px);
+  border-radius: 50%;
+  opacity: 0.9;
+  animation: glow-drift 14s ease-in-out infinite alternate;
+}
+
+/* Frame containing the character (neon outline + corner accents) */
+.hero-character-frame {
+  position: relative;
+  display: inline-block;
+  border-radius: 18px;
+  padding: 6px;
+  background:
+    linear-gradient(135deg,
+      var(--neon-cyan) 0%,
+      var(--neon-magenta) 50%,
+      var(--neon-violet) 100%);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 0 24px var(--accent-glow-cyan),
+    0 0 60px var(--accent-glow-magenta);
+  animation: float 6s ease-in-out infinite;
+}
+.hero-character {
+  display: block;
+  /* Source is a 1920×1088 landscape PNG (~16:9), so we let the
+     image keep its native ratio: width driven by clamp(), height auto. */
+  width: clamp(280px, 38vw, 520px);
+  height: auto;
+  border-radius: 14px;
+  background: var(--bg-elevated);
+  filter:
+    drop-shadow(0 0 12px rgba(0, 240, 255, 0.18))
+    contrast(1.05) saturate(1.10);
+}
+
+/* Cyberpunk L-shaped corner accents on the frame */
+.hero-character-corner {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--neon-cyan);
+  pointer-events: none;
+}
+.hero-character-corner.tl { top: -6px; left: -6px;  border-right: 0; border-bottom: 0; }
+.hero-character-corner.tr { top: -6px; right: -6px; border-left: 0;  border-bottom: 0; }
+.hero-character-corner.bl { bottom: -6px; left: -6px;  border-right: 0; border-top: 0; border-color: var(--neon-magenta); }
+.hero-character-corner.br { bottom: -6px; right: -6px; border-left: 0;  border-top: 0; border-color: var(--neon-magenta); }
+
+/* Caption under the character: monospace label so it reads as a dev-annotation */
+.hero-character-caption {
+  margin-top: 14px;
+  font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+  font-size: 0.74rem;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  text-shadow: 0 0 10px rgba(0, 240, 255, 0.18);
 }
 
 /* Kinetic glitch title */
@@ -824,13 +920,37 @@ code {
   50% { opacity: 0; }
 }
 
+/* Floating animation for the character mascot.
+   Subtle vertical drift (12px peak-to-peak) + slight clockwise tilt
+   so the frame doesn't look like a still photograph. */
+@keyframes float {
+  0%, 100% { transform: translateY(0) rotate(-1.2deg); }
+  50%      { transform: translateY(-12px) rotate(1.2deg); }
+}
+
+/* Glow halo drift: scale + slight rotate so the radial gradients
+   seem to "breathe" without ever moving the character pixel. */
+@keyframes glow-drift {
+  0%   { transform: scale(1)    rotate(-3deg); opacity: 0.85; }
+  50%  { transform: scale(1.06) rotate(2deg);  opacity: 1; }
+  100% { transform: scale(1)    rotate(-3deg); opacity: 0.85; }
+}
+
 /* ------------------------------------------------------------
    16. Mobile + reduced motion
    ------------------------------------------------------------ */
 @media (max-width: 720px) {
   .nav { padding: 1rem 1.25rem; }
   .nav-links { gap: 1.1rem; font-size: 0.86rem; }
-  .hero { padding: 5rem 1.25rem 4.5rem; }
+  .hero { padding: 3.5rem 1.25rem 4.5rem; }
+  /* Single column on mobile: figure on top (order: -1), text below. */
+  .hero-grid {
+    grid-template-columns: 1fr;
+    gap: 2.2rem;
+    text-align: center;
+  }
+  .hero-figure { order: -1; }
+  .hero-character { width: clamp(180px, 55vw, 280px); }
   .section { padding: 3.5rem 1.25rem 3rem; }
   .section-header { margin-bottom: 2.2rem; }
   .bento { grid-template-columns: repeat(2, 1fr); }
@@ -849,4 +969,7 @@ code {
   }
   .hero-title::before, .hero-title::after { display: none; }
   .btn::before { display: none; }
+  /* Keep the glow visible but static for users who opt out of motion. */
+  .hero-character-frame { animation: none; }
+  .hero-character-glow  { animation: none; }
 }
