@@ -1,85 +1,35 @@
 # ============================================================================
-# Kaggle_Workspace_FreeGPU — что НЕ публикуется на GitHub
-# Публичный репозиторий хранит ТОЛЬКО: README.md + установочные скрипты в instal/
-# Всё остальное (токены, блокноты, воркфлоу, локальные заметки) — только локально.
+# Kaggle_Workspace_FreeGPU — ветка `site`
+# Это React-сайт (Vite + React 19 + TS). Что НЕ публикуется на GitHub:
+#   - node_modules (генерируется npm ci)
+#   - dist/ и docs-site/dist/ (Vite build output, через GH Actions)
+#   - локальные state-файлы и IDE-мусор
 # ============================================================================
 
-# --- Секреты (КРИТИЧНО: токены/учётки никогда не уходим на GitHub) ---
+# --- Зависимости и build ---
+node_modules/
+dist/
+docs-site/dist/
+.vite/
+
+# --- Логи и runtime ---
+*.log
 .env
 .env.*
 .env.txt
 *.token
 *credentials*
 
-# --- Python ---
-__pycache__/
-*.py[cod]
-*.egg-info/
-.pytest_cache/
+# --- IDE / OS мусор ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
 
-# --- ComfyUI runtime / окружение Kaggle (ставится скриптами, не хранится) ---
-venv/
-.venv/
-ComfyUI/
-cloudflared
-bin/
-uv-python/
-uv-cache/
-*.log
-req.txt
-pinggy.py
-
-# --- Блокноты и рабочие процессы (воркфлоу ComfyUI) — только локально ---
-# `*.ipynb` привязан к корню через `/`: блокирует только блокноты прямо в корне.
-# В папках workflows/ и Notebook/ ipynb-файлы — публичные примеры (whitelist ниже).
-.ipynb_checkpoints/
-/*.ipynb
-*.ipynb_checkpoints
-# Воркфлоу ComfyUI в КОРНЕ репо — локально, не уходит на GitHub.
-# В папке workflows/ — публичные примеры графов (whitelist `!workflows/` ниже).
-# Паттерны привязаны к корню через `/`, чтобы НЕ блокировать содержимое workflows/.
-/Flux2dev32b*.json
-/LTX*.json
-/*Workflow*.json
-
-# --- Локальные тесты и драйверы Kaggle (токены, временные скрипты) ---
-_kaggle_tests/
-
-# --- Сторонние/смежные проекты (живут отдельно, не часть этого репо) ---
-angel-ui/
-Claude Code Docs/
-
-# --- Локальная память проекта и инструкции для агентов (не для GitHub) ---
-PROJECT_MEMORY.md
-instal/docs/
-**/AGENTS.md
-
-# --- Всё, что не относится к установочным скриптам ComfyUI ---
-# В репозитории публикуем ТОЛЬКО: README.md + .gitignore + instal/*.py + instal/.gitignore/* 
-!.gitignore
-!README.md
-!instal/
-!workflows/
-!Notebook/
-!docs-site/
-instal/*
-!instal/instal_comfyui.py
-!instal/instal_castom_node.py
-!instal/kaggle_env.py
-!instal/start.py
-!instal/.gitignore
-
-# --- Локальные state-файлы Jupyter-style tooling (не для GitHub) ---
-# Создаются рядом с блокнотами на машине пользователя. Явное перечисление
-# (а не `.*`) — чтобы случайно не скрыть .env / .gitattributes / .nojekyll.
+# --- State-файлы Jupyter-style tooling (локальные) ---
 .jbase
 .jkid
 
-# --- Vite / Node.js build артефакты (не для GitHub) ---
-# node_modules/ всегда генерируется `npm install`. dist/ — Vite build outDir.
-# docs-site/dist/ — конкретно наш build output (.gitignore правила см.
-# `!docs-site/` в whitelist выше — он не покрывает docs-site/dist!).
-node_modules/
-dist/
-docs-site/dist/
-.vite/
+# --- Локальная память проекта / инструкции агентов (не для GitHub) ---
+**/AGENTS.md
+PROJECT_MEMORY.md

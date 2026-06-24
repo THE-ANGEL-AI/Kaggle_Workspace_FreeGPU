@@ -1,22 +1,12 @@
 name: Deploy GitHub Pages
 
-# Триггерим деплой когда меняется:
-#   - src/** (React/TypeScript/CSS — source of truth)
-#   - public/** (статические ассеты — character.png)
-#   - index.html / vite.config.ts / package.json / package-lock.json (конфиги)
-#   - сам workflow файл
-# Правки instal/, workflows/, Notebook/, README.md НЕ триггерят пересборку.
+# Ветка `site` — единственный источник правды для React-сайта.
+# Ветка `main` — только Kaggle-скрипты, не содержит src/ и не должна триггерить
+# никаких сборок. Меняешь instal/ / workflows/ / Notebook/ в main → пуш идёт
+# без пересборки Vite (экономит минуты CI и не дёргает GH Pages зря).
 on:
   push:
-    branches: [ main ]
-    paths:
-      - 'src/**'
-      - 'public/**'
-      - 'index.html'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'vite.config.ts'
-      - '.github/workflows/pages.yml'
+    branches: [ site ]
   # Ручной запуск из вкладки Actions — на случай форсированного деплоя.
   workflow_dispatch:
 
@@ -47,8 +37,8 @@ jobs:
         run: npm ci --no-fund --no-audit
 
       - name: Build (Vite → docs-site/dist)
-        # BASE_URL оставляем пустым — subpath /Kaggle_Workspace_FreeGPU/
-        # зашит уже в vite.config.ts для production-сборки.
+        # Вывод кладём в docs-site/dist, чтобы доставить ассеты
+        # ровно туда, откуда upload-pages-artifact@v3 их потом заберёт.
         run: npm run build
         env:
           CI: 'true'              # подавляет Vite dev-only логи
