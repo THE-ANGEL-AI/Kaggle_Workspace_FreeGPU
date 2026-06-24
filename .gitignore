@@ -33,3 +33,18 @@ Thumbs.db
 # --- Локальная память проекта / инструкции агентов (не для GitHub) ---
 **/AGENTS.md
 PROJECT_MEMORY.md
+
+# --- DEFENSE IN DEPTH: защита от случайного попадания Kaggle-папок в site ---
+# В этой ветке живёт только React-сайт. Если когда-то случайно окажутся тут
+# нижеуказанные папки (например, после `git checkout main` в смежной рабочей
+# копии и копирования) — `git add` их НЕ подхватит без `--force`.
+instal/
+workflows/
+Notebook/
+_notebook/
+_kaggle_tests/
+.claude/
+angel-ui/
+Claude Code Docs/
+PROJECT_MEMORY.md
+instal/docs/
