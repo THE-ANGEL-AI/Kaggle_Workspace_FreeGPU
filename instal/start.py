@@ -22,11 +22,10 @@ start.py
     виджет → DOM раздувался и блокнот/браузер зависали.
 
 Скорость на T4:
-  * Запуск с --use-split-cross-attention — split attention (пакетная обработка
-    по чанкам). На T4 с 46+ фреймами быстрее чем SDPA math backend, не вызывает
-    OOM на больших латентах при upsampling до 2560×1440.
-  * SageAttention НЕ используется — он несовместим с Turing (T4, sm_75).
-    Все версии (1.x Triton, 2.x CUDA, форк SM75) проверены и падают на T4.
+  * SageAttention-SM75-path (github.com/XUANNISSAN/SageAttention-SM75-path):
+    форк с поддержкой Turing (sm_75) — INT8 QK + FP16 PV через CUDA.
+    Компилируется в рантайме, даёт ~1.2-1.5x к attention.
+    Если установка не удалась — fallback на --use-split-cross-attention.
   * smart-memory НЕ отключаем — модель кэшируется в VRAM между
     генерациями, повторный прогон быстрее.
 
@@ -309,6 +308,7 @@ class ComfyLauncher:
             self._check_git_updates()
             self._check_files()
             self._ensure_cloudflared()
+            self._install_sage_attention()
             self._start_comfy()
             self._wait_for_port()
             self._start_tunnel()
@@ -621,9 +621,67 @@ class ComfyLauncher:
 
 
 
+    # --- 3b. SageAttention-SM75 (Turing) -----------------------------
+    def _install_sage_attention(self):
+        """Устанавливает SageAttention-SM75-path с поддержкой Turing (sm_75).
+
+        Компилирует CUDA-ядро `sageattn_qk_int8_pv_fp16_cuda_sm75`.
+        Использует прямой python -m pip (не uv), потому что uv не всегда
+        корректно собирает CUDA-расширения из git.
+
+        Идемпотентно: если пакет уже импортируется — пропускает.
+        self.sage_ok = True/False — результат для динамического выбора флага.
+        """
+        self._print("[*] Проверяю SageAttention-SM75 (Turing)...")
+        self.sage_ok = False
+
+        check = subprocess.run(
+            [VENV_PYTHON, "-c", "import sageattention"],
+            capture_output=True, text=True, timeout=15)
+        if check.returncode == 0:
+            self._print("[*] SageAttention уже установлен (пропуск)")
+            self.sage_ok = True
+            return
+
+        self._set_status("⚙️ Устанавливаю SageAttention-SM75...", "#f39c12")
+        repo = "git+https://github.com/XUANNISSAN/SageAttention-SM75-path.git"
+
+        # Шаг 1: обновляем build-зависимости (нужны для сборки CUDA)
+        self._print("[*] Обновляю setuptools + wheel...")
+        subprocess.run(
+            [VENV_PYTHON, "-m", "pip", "install", "--upgrade",
+             "setuptools", "wheel"],
+            capture_output=True, text=True, timeout=120)
+
+        # Шаг 2: устанавливаем форк через pip (не uv!)
+        self._print("[*] Компилирую SageAttention-SM75 (CUDA под sm_75)...")
+        result = subprocess.run(
+            [VENV_PYTHON, "-m", "pip", "install", "--no-build-isolation", repo],
+            capture_output=True, text=True, timeout=600)
+
+        if result.returncode == 0:
+            verify = subprocess.run(
+                [VENV_PYTHON, "-c", "import sageattention"],
+                capture_output=True, text=True, timeout=15)
+            if verify.returncode == 0:
+                self._print("[OK] SageAttention-SM75 установлен! "
+                            "ComfyUI запустится с --use-sage-attention")
+                self._set_status("✅ SageAttention-SM75 готов", "#27ae60")
+                self.sage_ok = True
+                return
+
+        err = (result.stderr or "").strip()[:300]
+        self._print(f"[!] SageAttention НЕ установился: {err}")
+        self._print("[!] Запускаю со split-cross-attention (без Sage)")
+        self._set_status("⚠️ SageAttention не установлен — работаю без него",
+                         "#f39c12")
+
     # --- 4. запуск ComfyUI --------------------------------------------
     def _start_comfy(self):
         self._set_status("⏳ Запуск ComfyUI...", "#f39c12")
+        attention_flag = ("--use-sage-attention" if getattr(self, "sage_ok", False)
+                         else "--use-split-cross-attention")
+        self._print(f"[*] Attention: {attention_flag}")
         self.comfy_proc = subprocess.Popen(
             [
                 VENV_PYTHON, "main.py",
@@ -631,7 +689,7 @@ class ComfyLauncher:
                 "--port", str(PORT),
                 "--enable-cors-header", "*",
                 "--disable-auto-launch",
-                "--use-split-cross-attention",  # split внимание — быстрее SDPA math на T4 с 46+ фреймами
+                attention_flag,
                 "--preview-method", "auto",
             ],
             cwd=COMFY_DIR,
