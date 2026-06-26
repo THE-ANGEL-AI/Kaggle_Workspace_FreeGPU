@@ -707,6 +707,12 @@ class ComfyLauncher:
             content = f.read()
 
         if "#ifdef __CUDACC__" not in content:
+            # Добавляем include reduction_utils.cuh (нужен для warpReduceSum/Max)
+            if '#include "../reduction_utils.cuh"' not in content:
+                content = content.replace(
+                    '#include "attn_utils.cuh"',
+                    '#include "attn_utils.cuh"\n#include "../reduction_utils.cuh"', 1)
+
             # Извлекаем сигнатуру C++ функции для декларации
             sig = ""
             marker = "torch::Tensor qk_int8_sv_f16_accum_f32_attn_sm75"
@@ -799,6 +805,38 @@ __device__ __forceinline__ void mma_sync_m16n8k8_row_col_f16f16f32(float* C, uin
             self._print("[*] mma.cuh: добавлены SM75-врапперы (m8n8k32 int8 + m16n8k8 fp16)")
         else:
             self._print("[*] mma.cuh: SM75-врапперы уже есть")
+
+        # Шаг 3d: переписываем .cu файл — он содержит скелет с несуществующими
+        # MMA-вызовами (m8n8k4). Заменяем на минимальный файл, который просто
+        # включает attn_cuda_sm75.h (там настоящий кернел под #ifdef __CUDACC__).
+        cu_file = os.path.join(self.SAGE_SRC, "csrc", "qattn", "qk_int_sv_f16_cuda_sm75.cu")
+        with open(cu_file, "r", encoding="utf-8") as f:
+            cu_content = f.read()
+        if "SM75_SKELETON_REPLACED" not in cu_content:
+            minimal_cu = """/*
+ * Copyright (c) 2024 by SageAttention team.
+ * (SM75 Kernel — включается из attn_cuda_sm75.h)
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// SM75_SKELETON_REPLACED — скелет заменён на include attn_cuda_sm75.h
+#include "attn_cuda_sm75.h"
+"""
+            with open(cu_file, "w", encoding="utf-8") as f:
+                f.write(minimal_cu)
+            self._print("[*] qk_int_sv_f16_cuda_sm75.cu: заменён на #include attn_cuda_sm75.h")
+        else:
+            self._print("[*] qk_int_sv_f16_cuda_sm75.cu: уже пропатчен")
 
         # Шаг 4: собираем CUDA-расширение напрямую (без editable wheel)
         self._print("[*] Компилирую CUDA-ядро под sm_75 (это может занять 5-10 мин)...")
