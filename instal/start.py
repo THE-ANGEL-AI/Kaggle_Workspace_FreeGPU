@@ -606,7 +606,7 @@ class ComfyLauncher:
 
         Компилирует CUDA-ядро `sageattn_qk_int8_pv_fp16_cuda_sm75`.
         Идемпотентно: если пакет уже импортируется — пропускает.
-        self.sage_ok = True/False — результат для динамического выбора флага.
+        self.sage_ok = True/False — SageAttention доступен (ComfyUI custom node).
 
         Использует клонирование + local install, чтобы видеть полный лог
         ошибок при компиляции CUDA.
@@ -679,10 +679,11 @@ class ComfyLauncher:
         #   - .cu скелет — заменён на include
         # Ничего патчить не нужно.
 
-        # Шаг 4: собираем CUDA-расширение напрямую (без editable wheel)
-        self._print("[*] Компилирую CUDA-ядро под sm_75 (это может занять 5-10 мин)...")
+        # Шаг 4: editable install — собирает CUDA-ядро и прилинковывает исходники
+        self._print("[*] Компилирую CUDA-ядро под sm_75 и устанавливаю пакет (5-10 мин)...")
         result = subprocess.run(
-            [VENV_PYTHON, "setup.py", "build_ext", "--inplace"],
+            [VENV_PYTHON, "-m", "pip", "install", "-e", ".",
+             "--no-build-isolation", "--no-deps"],
             cwd=self.SAGE_SRC,
             capture_output=True, text=True, timeout=900)
 
@@ -740,25 +741,37 @@ class ComfyLauncher:
                 self._print(f"  {line}")
 
         if result.returncode == 0:
-            # После build_ext --inplace, .so файлы лежат в csrc/
-            # Ставим сам пакет без перекомпиляции
-            self._print("[*] CUDA-ядро скомпилировано, устанавливаю пакет...")
-            install = subprocess.run(
-                [VENV_PYTHON, "-m", "pip", "install", "--no-build-isolation",
-                 "--no-deps", "."],
-                cwd=self.SAGE_SRC,
-                capture_output=True, text=True, timeout=120)
-            for line in (install.stdout or "").split("\n")[-10:]:
-                self._print(f"  {line}")
+            # pip install -e . уже сделал всё: сборку + установку
+            self._print("[*] CUDA-ядро скомпилировано и пакет установлен (editable)")
 
             verify = subprocess.run(
                 [VENV_PYTHON, "-c", "import sageattention"],
                 capture_output=True, text=True, timeout=15)
             if verify.returncode == 0:
-                self._print("[OK] SageAttention-SM75 установлен! "
-                            "ComfyUI запустится с --use-sage-attention")
+                self._print("[OK] SageAttention-SM75 установлен!")
+                # Symlink в ComfyUI custom_nodes для авто-обнаружения ноды SageAttention-T4
+                sage_node_dir = f"{COMFY_DIR}/custom_nodes/SageAttention-T4"
+                try:
+                    # Если symlink уже есть, но указывает не туда — пересоздаём
+                    if os.path.islink(sage_node_dir):
+                        if os.readlink(sage_node_dir) != self.SAGE_SRC:
+                            os.unlink(sage_node_dir)
+                            os.symlink(self.SAGE_SRC, sage_node_dir)
+                            self._print("[*] ComfyUI node symlink обновлён: SageAttention-T4")
+                        else:
+                            self._print("[*] ComfyUI node уже в custom_nodes: SageAttention-T4")
+                    elif not os.path.exists(sage_node_dir):
+                        os.symlink(self.SAGE_SRC, sage_node_dir)
+                        self._print("[*] ComfyUI node symlinked: SageAttention-T4")
+                    else:
+                        self._print(f"[*] ComfyUI node dir exists (not symlink): {sage_node_dir}")
+                except OSError as e:
+                    self._print(f"[!] Symlink не удался ({e}) — ComfyUI-нода НЕ обнаружена. "
+                                f"Скопируй comfyui_nodes/ в {sage_node_dir} вручную.")
                 self._set_status("✅ SageAttention-SM75 готов", "#27ae60")
                 self.sage_ok = True
+                # Auto-inject SageAttention-T4 into ComfyUI workflows
+                self._inject_sageattn_into_workflows()
                 return
             else:
                 self._print(f"[!] Пакет установлен, но не импортируется: "
@@ -769,22 +782,43 @@ class ComfyLauncher:
         self._set_status("⚠️ SageAttention не установлен — работаю без него",
                          "#f39c12")
 
+    def _inject_sageattn_into_workflows(self):
+        try:
+            injector = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                'scripts', 'inject_sageattn_workflow.py'
+            )
+            workflows_dir = f"{COMFY_DIR}/user/default/workflows"
+            if os.path.exists(injector) and os.path.isdir(workflows_dir):
+                subprocess.run(
+                    [VENV_PYTHON, injector, workflows_dir],
+                    capture_output=True, text=True, timeout=120)
+                self._print("[*] SageAttention-T4 injected into ComfyUI workflows")
+        except Exception as e:
+            self._print(f"[!] Workflow injection failed: {e}")
+
     # --- 4. запуск ComfyUI --------------------------------------------
     def _start_comfy(self):
         self._set_status("⏳ Запуск ComfyUI...", "#f39c12")
-        attention_flag = ("--use-sage-attention" if getattr(self, "sage_ok", False)
-                         else "--use-split-cross-attention")
-        self._print(f"[*] Attention: {attention_flag}")
+        sage_ok = getattr(self, "sage_ok", False)
+        if sage_ok:
+            self._print("[*] Attention: SageAttention-T4 (ComfyUI custom node)")
+        else:
+            self._print("[*] Attention: --use-split-cross-attention (SageAttention не установлен)")
+
+        comfy_args = [
+            VENV_PYTHON, "main.py",
+            "--listen", "0.0.0.0",
+            "--port", str(PORT),
+            "--enable-cors-header", "*",
+            "--disable-auto-launch",
+            "--preview-method", "auto",
+        ]
+        if not sage_ok:
+            comfy_args.append("--use-split-cross-attention")
+
         self.comfy_proc = subprocess.Popen(
-            [
-                VENV_PYTHON, "main.py",
-                "--listen", "0.0.0.0",
-                "--port", str(PORT),
-                "--enable-cors-header", "*",
-                "--disable-auto-launch",
-                attention_flag,
-                "--preview-method", "auto",
-            ],
+            comfy_args,
             cwd=COMFY_DIR,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,

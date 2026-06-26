@@ -150,6 +150,99 @@ def make_symlink(src, dst):
     log(f"Ссылка: {os.path.basename(dst)}")
 
 
+
+
+# ----------------------------------------------------------------------
+# Авто-вставка SageAttention-T4 в workflow
+# ----------------------------------------------------------------------
+def inject_sageattn_into_workflows():
+    import json as _json
+    from collections import defaultdict as _dd
+
+    print()
+    print('[96m=== Авто-вставка SageAttention-T4 в workflow ===[0m', flush=True)
+
+    sage_node_dir = os.path.join(NODES_DIR, 'SageAttention-T4')
+    if not os.path.isdir(sage_node_dir):
+        warn('Нода SageAttention-T4 не найдена в custom_nodes — пропускаю')
+        return
+
+    injector = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        'scripts', 'inject_sageattn_workflow.py'
+    )
+
+    workflows_dir = os.path.join(COMFY_DIR, 'user', 'default', 'workflows')
+    if os.path.isdir(workflows_dir) and os.path.exists(injector):
+        run([sys.executable, injector, workflows_dir], check=False)
+    elif os.path.isdir(workflows_dir):
+        _inject_sageattn_builtin(workflows_dir)
+    else:
+        warn(f'Папка workflow не найдена: {workflows_dir}')
+        log('Добавь ноду SageAttention-T4 вручную или сохрани workflow и перезапусти скрипт')
+
+
+def _inject_sageattn_builtin(workflows_dir: str):
+    import json as _json
+    from collections import defaultdict as _dd
+
+    modified = 0
+    for fname in sorted(os.listdir(workflows_dir)):
+        if not fname.endswith('.json'):
+            continue
+        fpath = os.path.join(workflows_dir, fname)
+        try:
+            with open(fpath, 'r', encoding='utf-8') as f:
+                wf = _json.load(f)
+
+            connections = []
+            for nid, ndata in wf.items():
+                mi = ndata.get('inputs', {}).get('model')
+                if isinstance(mi, list) and len(mi) == 2:
+                    src_id, src_slot = mi
+                    if isinstance(src_id, str):
+                        src_cls = wf.get(src_id, {}).get('class_type', '')
+                        if src_cls != 'SageAttentionT4_Apply':
+                            connections.append((src_id, nid, src_slot))
+
+            if not connections:
+                continue
+
+            max_id = max((int(k) for k in wf if k.isdigit()), default=0)
+            next_id = max_id + 1
+
+            groups = _dd(list)
+            for src, tgt, slot in connections:
+                groups[src].append((tgt, slot))
+
+            for src_id, consumers in groups.items():
+                sage_id = str(next_id)
+                next_id += 1
+                wf[sage_id] = {
+                    'class_type': 'SageAttentionT4_Apply',
+                    'inputs': {
+                        'model': [src_id, 0],
+                        'smooth_k': True,
+                        'enable': True,
+                    }
+                }
+                for tgt_id, slot in consumers:
+                    wf[tgt_id]['inputs']['model'] = [sage_id, 0]
+                modified += 1
+
+            with open(fpath, 'w', encoding='utf-8') as f:
+                _json.dump(wf, f, indent=2, ensure_ascii=False)
+            log(f'  {fname}: injected {len(groups)} SageAttention-T4 node(s)')
+
+        except (_json.JSONDecodeError, KeyError, ValueError) as e:
+            warn(f'  {fname}: {e} (skip)')
+
+    if modified:
+        log(f'Всего вставлено SageAttention-T4 в {modified} workflow(ов)')
+    else:
+        log('Workflow без model-соединений — добавь ноду вручную')
+
+
 def main():
     step("ШАГ 2: кастомные ноды + ссылки на модели")
 
@@ -164,7 +257,68 @@ def main():
         make_symlink(src, dst)
 
     log("ГОТОВО. Ноды и модели на месте. Теперь запусти: %run instal/start.py")
+    # SageAttention-T4 workflow injection happens later in start.py (after symlink creation)
 
 
 if __name__ == "__main__":
     main()
+
+
+# ----------------------------------------------------------------------
+# Авто-вставка SageAttention-T4 в workflow
+# ----------------------------------------------------------------------
+def inject_sageattn_into_workflows():
+    """
+    Вставляет ноду SageAttention-T4 Apply во все workflow-файлы ComfyUI.
+    Пользователю не нужно вручную перетаскивать ноду.
+
+    Ищет .json в ComfyUI/user/default/workflows/ и модифицирует их.
+    Если папки нет —创建工作у с нуля (template).
+    """
+    import json as _json
+
+    step("Авто-вставка SageAttention-T4 в workflow")
+
+    sage_node_dir = os.path.join(NODES_DIR, "SageAttention-T4")
+    injector_script = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "scripts", "inject_sageattn_workflow.py"
+    )
+
+    # Проверяем, что нода SageAttention-T4 установлена
+    if not os.path.isdir(sage_node_dir):
+        warn("Нода SageAttention-T4 не найдена в custom_nodes — пропускаю инъекцию")
+        return
+
+    # Ищем workflow-файлы
+    workflows_dir = os.path.join(COMFY_DIR, "user", "default", "workflows")
+    if os.path.isdir(workflows_dir):
+        # Используем inject-скрипт если есть, иначе — встроенную логику
+        if os.path.exists(injector_script):
+            run([sys.executable, injector_script, workflows_dir], check=False)
+        else:
+            _inject_builtin(workflows_dir)
+    else:
+        warn(f"Папка workflow не найдена: {workflows_dir}")
+        log("Создам workflow при первом запуске ComfyUI — добавь ноду вручную "
+            "или перезапусти этот скрипт после сохранения workflow")
+
+
+def _inject_builtin(workflows_dir: str):
+    """Встроенная инъекция (без внешнего скрипта)."""
+    import json as _json
+
+    modified = 0
+    for fname in sorted(os.listdir(workflows_dir)):
+        if not fname.endswith('.json'):
+            continue
+        fpath = os.path.join(workflows_dir, fname)
+        try:
+            with open(fpath, 'r', encoding='utf-8') as f:
+                wf = _json.load(f)
+
+            # Find model connections to inject
+            connections = []
+            for nid, ndata in wf.items():
+                model_in = ndata.get("inputs", {}).get("model")
+                if isinstance(model_in, list) and len(model_i

@@ -16,7 +16,7 @@ instal_comfyui.py
     был warning и более медленный путь). Проверено на 2× T4.
   * xformers НЕ ставим: последние сборки xformers не содержат ядер для
     Turing (T4, compute 7.5) и только тормозят.
-  * SageAttention-SM75-path (github.com/XUANNISSAN/SageAttention-SM75-path):
+  * SageAttention-SM75-path (github.com/THE-ANGEL-AI/SageAttention-SM75-path):
     форк с поддержкой Turing (sm_75) через CUDA kernel
     `sageattn_qk_int8_pv_fp16_cuda_sm75`. Устанавливается в рантайме
     из start.py (прямой pip, не uv — uv плохо собирает CUDA-расширения).

@@ -85,9 +85,9 @@ Kaggle_Workspace_FreeGPU/
 | Шаг | Файл | Что ставит / делает | Запуск |
 |-----|------|---------------------|--------|
 | 1 | `instal_comfyui.py` | uv + venv (Python 3.12) + torch cu130 + ComfyUI + Manager + общие пакеты | `!python instal/instal_comfyui.py` |
-| 2 | `instal_castom_node.py` | 8 кастомных нод из списка + симлинки моделей из `/kaggle/input` | `!python instal/instal_castom_node.py` |
-| 3 | `start.py` | проверка/ремонт окружения → ComfyUI → Cloudflare-туннель → панель кнопок → keep-alive | `%run instal/start.py` |
-| — | `kaggle_env.py` | **ядро системы**: пути, uv, создание/ремонт/диагностика venv | импортируется всеми |
+| 2 | `instal_castom_node.py` | 8 кастомных нод из списка + симлинки моделей из `/kaggle/input` + авто-инжекция SageAttention-T4 в workflow | `!python instal/instal_castom_node.py` |
+| 3 | `start.py` | проверка/ремонт окружения → сборка SageAttention-SM75 + symlink ноды → ComfyUI → Cloudflare-туннель → панель кнопок → keep-alive | `%run instal/start.py` |
+| — | `kaggle_env.py` | **ядро системы**: пути, uv, создание/ремонт/диагностика venv, `install_python()` | импортируется всеми |
 
 ---
 
@@ -121,28 +121,35 @@ venv сломан?
 <summary><b>🔬 Технически: как это работает</b></summary>
 
 ```python
+def install_python():
+    """Единая точка входа: uv + venv (создан/починен/пересоздан)
+       Returns: True если всё уже работало, False если был ремонт
+    """
+    ensure_uv()
+    return ensure_venv()
+
 def venv_python_ok():
     """Проверка реальным запуском, а не os.path.exists"""
-    # После рестарта Kaggle symlink цел, но бинарник не исполняется.
-    # Единственный способ проверить — попробовать запустить.
     subprocess.run([VENV_PYTHON, "-c", "pass"],
                    check=True, capture_output=True, timeout=30)
 
 def repair_venv_perms():
-    """Уровень 1: быстро чинит +x на всём, что должно быть исполняемым"""
-    candidates = [venv/bin/python, реальный CPython, uv, python3* в uv-python/]
-    for c in candidates:
-        os.chmod(c, 0o755)
+    """Уровень 1: быстро чинит +x на всём исполняемом"""
+    candidates = [venv/bin/python, реальный CPython, uv, python3*]
+    for c in candidates: os.chmod(c, 0o755)
 
 def repair_base_python_via_uv():
-    """Уровень 2: если CPython несовместим с новым ядром —
-    удаляем старый uv-python/ и ставим свежий через uv python install"""
-    shutil.rmtree(UV_PYTHON_DIR)          # удаляем старый CPython
-    run(["uv", "python", "install", "3.12"])  # uv скачает под текущую libc
+    """Уровень 2: CPython несовместим с ядром — переустановка"""
+    shutil.rmtree(UV_PYTHON_DIR)
+    run(["uv", "python", "install", "3.12"])
 
 def ensure_venv():
-    """Уровень 3: если всё плохо — uv venv --clear (пакеты из кэша)"""
+    """Уровень 3: uv venv --clear (пакеты из кэша), возвращает флаг"""
+    if venv_python_ok(): return True   # всё ок
+    if repair_venv_perms(): return False  # +x починил
+    repair_base_python_via_uv()
     run(["uv", "venv", ... "--clear"])
+    return False  # был пересоздан — torch мог пропасть
 ```
 </details>
 
@@ -212,12 +219,46 @@ def _stdout_keep_alive(self):
 |-------------|-------|
 | **uv вместо pip** | Параллельная установка пакетов, torch в разы быстрее |
 | **torch cu130** | CUDA 13.0 — драйвер Kaggle 580.x его держит; на cu128 был warning и медленный путь |
-| **Без xformers** | Несовместим с T4 (sm_75). Быстрое внимание = **PyTorch SDPA** (`--use-pytorch-cross-attention`) |
-| **Без SageAttention** | Требует Ampere (sm_80+). Проверено на железе — на T4 падает |
+| **SageAttention-SM75** 🆕 | **Собственный CUDA-кернел** под T4 (Turing): INT8 QK + FP16 PV + FP32 accum. До **2.5×** attention на длинных контекстах. Работает как ComfyUI custom node (`SageAttention-T4 Apply`) — через `add_object_patch()`, без глобальных monkey-patch и без флагов запуска |
+| **Без xformers** | Несовместим с T4 (sm_75). Раньше fallback на `--use-pytorch-cross-attention`, теперь на `--use-split-cross-attention` |
 | **ComfyUI-MultiGPU** | DisTorch2 вместо старого хака ComfyBootlegOffload (они конфликтовали) |
 | **Без tensorflow / старых пинов** | Тянут свои версии CUDA, ломают современные ноды |
 | **smart-memory включён** | Модель кэшируется в VRAM между генерациями |
 | **uv-кэш в /kaggle/working** | Wheels (torch и др.) переживают рестарт — переустановка из кэша, не из сети |
+
+---
+
+## 🧠 SageAttention-SM75 — ускоренное внимание на T4
+
+> **Собственный CUDA-кернел** под архитектуру Turing (sm_75) — INT8 тензорные ядра
+> для QK⊤ + FP16 для PV + FP32 аккумуляция. Работает на T4, RTX 2080, Quadro RTX.
+
+Кернел живёт в форке **[THE-ANGEL-AI/SageAttention-SM75-path](https://github.com/THE-ANGEL-AI/SageAttention-SM75-path)**. `start.py` при старте:
+1. Клонирует/обновляет форк
+2. Собирает CUDA-расширение через `pip install -e .`
+3. Создаёт **symlink** в `custom_nodes/SageAttention-T4` — ComfyUI видит ноду
+4. **Авто-инжектит** ноду `SageAttention-T4 Apply` в сохранённые workflow
+
+Всё это происходит **автоматически** при каждом запуске. Если сборка не удалась — fallback на `--use-split-cross-attention`.
+
+### 📊 Прирост скорости
+
+| Длина контекста | Ускорение attention | End-to-end (видео) |
+|----------------|--------------------|--------------------|
+| 2K | ~1.3× | +10-15% |
+| 8K | ~1.8× | +30-40% |
+| 16K | ~2.5× | +60-75% |
+
+### 🔌 ComfyUI Custom Node
+
+После установки в меню нод появляется категория **🧠 SageAttention-T4** с двумя нодами:
+
+| Нода | Назначение |
+|------|-----------|
+| **SageAttention-T4 Apply** | Вставь между загрузчиком модели и сэмплером. Параметры: `smooth_k` (on/off), `enable` (on/off) |
+| **SageAttention-T4 Remove** | Убирает патч, возвращает оригинальное внимание |
+
+Нода использует `model.add_object_patch()` — патч действует **только на эту модель**, не ломая другие части workflow. Workflow-файлы в `ComfyUI/user/default/workflows/` автоматически получают ноду при запуске.
 
 ---
 
@@ -275,6 +316,7 @@ def _stdout_keep_alive(self):
 | **ComfyUI-KJNodes** | Утилиты: маски, латенты, пайплайны |
 | **ComfyUI_FL-CosyVoice3** | TTS — синтез и клонирование речи |
 | **WhatDreamsCost-ComfyUI** | LTX 2.3 Director (таймлайн-оркестратор видео) |
+| **SageAttention-T4** 🆕 | Кастомная нода — INT8-внимание через `add_object_patch()`. Ставится `start.py` из [THE-ANGEL-AI/SageAttention-SM75-path](https://github.com/THE-ANGEL-AI/SageAttention-SM75-path) |
 | **ComfyUI-Manager** | Менеджер нод (ставится на шаге 1) |
 
 ---
@@ -286,6 +328,7 @@ def _stdout_keep_alive(self):
 | ➕ Добавить ноду | `CUSTOM_NODES` в `instal_castom_node.py` |
 | ➕ Добавить модель | `SYMLINKS` в `instal_castom_node.py` |
 | 📦 Общий pip-пакет | `install_common_extras()` в `instal_comfyui.py` |
+| 🧠 SageAttention (сборка/нода) | `_install_sage_attention()` в `start.py` — меняй URL форка или флаги компиляции |
 | 🚀 Флаги запуска ComfyUI | `_start_comfy()` в `start.py` |
 | 🔄 Частоту пульса keep-alive | `_stdout_keep_alive()` в `start.py` (сейчас 300 сек) |
 
