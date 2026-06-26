@@ -718,6 +718,80 @@ class ComfyLauncher:
                 f.write(guarded)
             self._print("[*] attn_cuda_sm75.h: весь CUDA-код под #ifdef __CUDACC__")
 
+        # Шаг 3c: добавляем недостающие MMA-функции для SM75 в mma.cuh
+        # (форк использует m8n8k32 int8 и m16n8k8 fp16, которых нет в mma.cuh)
+        mma_cuh = os.path.join(self.SAGE_SRC, "csrc", "mma.cuh")
+        with open(mma_cuh, "r", encoding="utf-8") as f:
+            mma_content = f.read()
+
+        # Проверяем, есть ли уже m8n8k32
+        if "mma_sync_m8n8k32_row_col_s8s8s32" not in mma_content:
+            sm75_mma_additions = """
+// ===== SM75 (Turing) MMA wrappers =====
+// mma.sync.aligned.m8n8k32.row.col.s32.s8.s8.s32
+template <MMAMode mma_mode = MMAMode::kInplaceUpdate>
+__device__ __forceinline__ void mma_sync_m8n8k32_row_col_s8s8s32(int32_t* C, uint32_t* A, uint32_t* B) {
+  if constexpr (mma_mode == MMAMode::kInplaceUpdate) {
+    asm volatile(
+        "mma.sync.aligned.m8n8k32.row.col.s32.s8.s8.s32 "
+        "{%0, %1, %2, %3},"
+        "{%4, %5, %6, %7},"
+        "{%8, %9},"
+        "{%10, %11, %12, %13};\\n"
+        : "=r"(C[0]), "=r"(C[1]), "=r"(C[2]), "=r"(C[3])
+        : "r"(A[0]), "r"(A[1]), "r"(A[2]), "r"(A[3]), "r"(B[0]), "r"(B[1]),
+          "r"(C[0]), "r"(C[1]), "r"(C[2]), "r"(C[3]));
+  } else {
+    asm volatile(
+        "mma.sync.aligned.m8n8k32.row.col.s32.s8.s8.s32 "
+        "{%0, %1, %2, %3},"
+        "{%4, %5, %6, %7},"
+        "{%8, %9},"
+        "{%10, %11, %12, %13};\\n"
+        : "=r"(C[0]), "=r"(C[1]), "=r"(C[2]), "=r"(C[3])
+        : "r"(A[0]), "r"(A[1]), "r"(A[2]), "r"(A[3]), "r"(B[0]), "r"(B[1]),
+          "r"(0), "r"(0), "r"(0), "r"(0));
+  }
+}
+
+// mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32
+template <MMAMode mma_mode = MMAMode::kInplaceUpdate>
+__device__ __forceinline__ void mma_sync_m16n8k8_row_col_f16f16f32(float* C, uint32_t* A, uint32_t* B) {
+  if constexpr (mma_mode == MMAMode::kInplaceUpdate) {
+    asm volatile(
+        "mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 "
+        "{%0, %1, %2, %3},"
+        "{%4, %5, %6, %7},"
+        "{%8, %9},"
+        "{%10, %11, %12, %13};\\n"
+        : "=f"(C[0]), "=f"(C[1]), "=f"(C[2]), "=f"(C[3])
+        : "r"(A[0]), "r"(A[1]), "r"(A[2]), "r"(A[3]), "r"(B[0]), "r"(B[1]),
+          "f"(C[0]), "f"(C[1]), "f"(C[2]), "f"(C[3]));
+  } else {
+    asm volatile(
+        "mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 "
+        "{%0, %1, %2, %3},"
+        "{%4, %5, %6, %7},"
+        "{%8, %9},"
+        "{%10, %11, %12, %13};\\n"
+        : "=f"(C[0]), "=f"(C[1]), "=f"(C[2]), "=f"(C[3])
+        : "r"(A[0]), "r"(A[1]), "r"(A[2]), "r"(A[3]), "r"(B[0]), "r"(B[1]),
+          "f"(0.f), "f"(0.f), "f"(0.f), "f"(0.f));
+  }
+}
+// ===== END SM75 wrappers =====
+
+"""
+            # Вставляем перед закрывающей скобкой namespace mma
+            mma_content = mma_content.replace(
+                "} // namespace mma",
+                sm75_mma_additions + "\n} // namespace mma", 1)
+            with open(mma_cuh, "w", encoding="utf-8") as f:
+                f.write(mma_content)
+            self._print("[*] mma.cuh: добавлены SM75-врапперы (m8n8k32 int8 + m16n8k8 fp16)")
+        else:
+            self._print("[*] mma.cuh: SM75-врапперы уже есть")
+
         # Шаг 4: собираем CUDA-расширение напрямую (без editable wheel)
         self._print("[*] Компилирую CUDA-ядро под sm_75 (это может занять 5-10 мин)...")
         result = subprocess.run(
@@ -725,7 +799,7 @@ class ComfyLauncher:
             cwd=self.SAGE_SRC,
             capture_output=True, text=True, timeout=900)
 
-        # Сохраняем полный лог в файл (на случай обрезания в stdout)
+        # Сохраняем полный лог в файл
         log = (result.stdout or "").strip()
         err = (result.stderr or "").strip()
         full = log + "\n" + err
@@ -734,27 +808,49 @@ class ComfyLauncher:
             f.write("=== STDOUT ===\n" + log + "\n=== STDERR ===\n" + err)
         self._print(f"[*] Полный лог сохранён в {log_path}")
 
-        # Ищем строки с ошибками компиляции (не Python traceback)
-        errors = [l for l in full.split("\n") if "error" in l.lower()]
-        # Показываем ТОЛЬКО строки с компиляторными ошибками (C++/CUDA/nvcc/ninja)
-        compile_errors = [
-            l for l in errors
-            if any(x in l.lower() for x in [": error:", "fatal error", "nvcc error",
-                                            "c++ error", "cuda error", "cc1plus"])
-        ]
-        if compile_errors:
-            self._print("[!] ОШИБКИ КОМПИЛЯЦИИ:")
-            for line in compile_errors[-30:]:
-                self._print(f"  ⛔ {line}")
+        # Разделяем: сначала компиляция ninja, потом Python трейсбек
+        # Ищем границу трейсбека (File "/kaggle/...")
+        lines = full.split("\n")
+        traceback_start = -1
+        for i, l in enumerate(lines):
+            if 'File "/kaggle/' in l and 'python' in l.lower():
+                traceback_start = i
+                break
+
+        if traceback_start > 0:
+            # Есть трейсбек — компиляторные ошибки до него
+            compile_lines = lines[:traceback_start]
+            self._print(f"[*] Строк до трейсбека: {len(compile_lines)}")
+            # Ищем строки, похожие на ошибки компилятора
+            # Показываем первые строки (команды компиляции)
+            self._print("[*] Первые 20 строк лога (команды компиляции):")
+            for line in compile_lines[:20]:
+                self._print(f"  {line}")
+
+            # Ищем строки, похожие на ошибки компилятора
+            err_lines = [
+                l for l in compile_lines
+                if any(x in l.lower() for x in [
+                    "error:", "fatal", "undefined",
+                    "no member", "not declared", "implicit",
+                    "failed:", "ninja: build stopped",
+                    "cannot find", "no such file",
+                ])
+            ]
+            if err_lines:
+                self._print("[!] ОШИБКИ КОМПИЛЯЦИИ/СБОРКИ:")
+                for line in err_lines[-40:]:
+                    self._print(f"  ⛔ {line}")
+            else:
+                # Показываем последние строки из компиляции
+                self._print("[*] Последние строки компиляции (до трейсбека):")
+                for line in compile_lines[-50:]:
+                    self._print(f"  {line}")
         else:
-            # Если нет — показываем последние 20 error-строк
-            self._print("[*] Ошибок компиляции не найдено, показываю последние строки:")
-            for line in errors[-20:]:
-                self._print(f"  ⛔ {line}")
-        # и последние 30 строк лога
-        self._print("[... последние строки лога ...]")
-        for line in full.split("\n")[-30:]:
-            self._print(f"  {line}")
+            # Нет трейсбека — просто последние строки
+            self._print("[*] Трейсбек не найден, последние строки лога:")
+            for line in lines[-30:]:
+                self._print(f"  {line}")
 
         if result.returncode == 0:
             # После build_ext --inplace, .so файлы лежат в csrc/
