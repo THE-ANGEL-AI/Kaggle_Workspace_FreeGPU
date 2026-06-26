@@ -663,7 +663,12 @@ class ComfyLauncher:
                 ["git", "-C", self.SAGE_SRC, "remote", "set-url", "origin", repo_url],
                 capture_output=True, text=True, timeout=30)
             self._print("[*] Репозиторий уже склонирован — проверяю обновления форка...")
-            # fetch + ff-only pull — авто-обновление при каждом старте
+            # Сбрасываем локальные патчи (старая версия start.py патчила файлы
+            # вручную — они теперь в форке, и мешают pull'у). git reset --hard даёт
+            # чистый slate перед fetch+pull.
+            subprocess.run(
+                ["git", "-C", self.SAGE_SRC, "reset", "--hard", "--quiet"],
+                capture_output=True, text=True, timeout=30)
             subprocess.run(
                 ["git", "-C", self.SAGE_SRC, "fetch", "--quiet"],
                 capture_output=True, text=True, timeout=30)
