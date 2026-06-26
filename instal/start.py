@@ -690,24 +690,33 @@ class ComfyLauncher:
                 f.write(content)
             self._print("[*] setup.py пропатчен")
 
-        # Шаг 3b: патчим CUDA-хедер — __syncthreads + __int2float_rz
-        # (CUDA 12+/13+ требует cuda_runtime.h, __int2float_rz → __int2float_rn)
+        # Шаг 3b: патчим CUDA-хедер — оборачиваем в #ifdef __CUDACC__
+        # (pybind_sm75.cpp включает этот хедер и компилируется g++, который
+        #  не знает CUDA intrinsic). Весь CUDA-код → под guard, декларация
+        #  C++ функции → снаружи (для взятия адреса &function в pybind).
         hdr = os.path.join(self.SAGE_SRC, "csrc", "qattn", "attn_cuda_sm75.h")
         with open(hdr, "r", encoding="utf-8") as f:
             content = f.read()
-        edits = 0
-        if '#include <cuda_runtime.h>' not in content:
-            content = content.replace(
-                '#include "../utils.cuh"',
-                '#include "../utils.cuh"\n#include <cuda_runtime.h>', 1)
-            edits += 1
-        if '__int2float_rz' in content:
-            content = content.replace('__int2float_rz', '__int2float_rn')
-            edits += 1
-        if edits:
+
+        if "#ifdef __CUDACC__" not in content:
+            # Извлекаем сигнатуру C++ функции для декларации
+            sig = ""
+            marker = "torch::Tensor qk_int8_sv_f16_accum_f32_attn_sm75"
+            if marker in content:
+                cpp_part = content[content.index(marker):]
+                sig = cpp_part.split("{", 1)[0] + ";\n"
+
+            guarded = (
+                "#ifdef __CUDACC__\n"
+                f"{content}\n"
+                "#endif  // __CUDACC__\n"
+            )
+            if sig:
+                guarded += f"\n// Декларация для host compiler (pybind берёт &function)\n{sig}"
+
             with open(hdr, "w", encoding="utf-8") as f:
-                f.write(content)
-            self._print(f"[*] attn_cuda_sm75.h пропатчен ({edits} изменений)")
+                f.write(guarded)
+            self._print("[*] attn_cuda_sm75.h: весь CUDA-код под #ifdef __CUDACC__")
 
         # Шаг 4: собираем CUDA-расширение напрямую (без editable wheel)
         self._print("[*] Компилирую CUDA-ядро под sm_75 (это может занять 5-10 мин)...")
