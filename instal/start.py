@@ -686,9 +686,17 @@ class ComfyLauncher:
         )
         if "torch.utils.cpp_extension._check_cuda_version" not in content:
             content = content.replace("import torch", patch + "import torch", 1)
+            # Также фиксим -gencode: вместо `f"-gencode arch=...,code=..."`
+            # делаем два отдельных элемента: "-gencode", "arch=...,code=..."
+            import re
+            content = re.sub(
+                r'f"-gencode arch=(compute_\d+),code=(sm_\d+)"',
+                '"-gencode",\n            f"arch=\\1,code=\\2"',
+                content
+            )
             with open(setup_py, "w", encoding="utf-8") as f:
                 f.write(content)
-            self._print("[*] setup.py пропатчен")
+            self._print("[*] setup.py пропатчен (+ -gencode split)")
 
         # Шаг 3b: патчим CUDA-хедер — оборачиваем в #ifdef __CUDACC__
         # (pybind_sm75.cpp включает этот хедер и компилируется g++, который
