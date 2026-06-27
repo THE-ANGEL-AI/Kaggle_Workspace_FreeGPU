@@ -69,6 +69,7 @@ def run(cmd, check=True, **kwargs):
         kwargs.setdefault("shell", True)
     else:
         printable = " ".join(cmd)
+        kwargs.setdefault("shell", False)
     print(f"$ {printable}", flush=True)
     return subprocess.run(cmd, check=check, **kwargs)
 

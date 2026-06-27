@@ -109,7 +109,9 @@ SYMLINKS = [
 
 def uv_pip_install_req(req_path):
     """Ставит requirements ноды в наш venv через uv."""
-    run(["uv", "pip", "install", "--python", VENV_PYTHON, "-r", req_path], check=False)
+    result = run(["uv", "pip", "install", "--python", VENV_PYTHON, "-r", req_path], check=False)
+    if result and result.returncode != 0:
+        warn(f"Установка requirements ноды не удалась: {req_path}")
 
 
 def check_prerequisites():
@@ -161,11 +163,8 @@ def make_symlink(src, dst):
 # Авто-вставка SageAttention-T4 в workflow
 # ----------------------------------------------------------------------
 def inject_sageattn_into_workflows():
-    import json as _json
-    from collections import defaultdict as _dd
-
     print()
-    print('[96m=== Авто-вставка SageAttention-T4 в workflow ===[0m', flush=True)
+    print('\033[96m=== Авто-вставка SageAttention-T4 в workflow ===\033[0m', flush=True)
 
     sage_node_dir = os.path.join(NODES_DIR, 'SageAttention-T4')
     if not os.path.isdir(sage_node_dir):
@@ -177,75 +176,18 @@ def inject_sageattn_into_workflows():
         'scripts', 'inject_sageattn_workflow.py'
     )
 
+    if not os.path.exists(injector):
+        warn(f'Инжектор не найден: {injector}')
+        log('Добавь ноду SageAttention-T4 вручную или перезапусти скрипт')
+        return
+
     workflows_dir = os.path.join(COMFY_DIR, 'user', 'default', 'workflows')
-    if os.path.isdir(workflows_dir) and os.path.exists(injector):
-        run([sys.executable, injector, workflows_dir], check=False)
-    elif os.path.isdir(workflows_dir):
-        _inject_sageattn_builtin(workflows_dir)
-    else:
+    if not os.path.isdir(workflows_dir):
         warn(f'Папка workflow не найдена: {workflows_dir}')
         log('Добавь ноду SageAttention-T4 вручную или сохрани workflow и перезапусти скрипт')
+        return
 
-
-def _inject_sageattn_builtin(workflows_dir: str):
-    import json as _json
-    from collections import defaultdict as _dd
-
-    modified = 0
-    for fname in sorted(os.listdir(workflows_dir)):
-        if not fname.endswith('.json'):
-            continue
-        fpath = os.path.join(workflows_dir, fname)
-        try:
-            with open(fpath, 'r', encoding='utf-8') as f:
-                wf = _json.load(f)
-
-            connections = []
-            for nid, ndata in wf.items():
-                mi = ndata.get('inputs', {}).get('model')
-                if isinstance(mi, list) and len(mi) == 2:
-                    src_id, src_slot = mi
-                    if isinstance(src_id, str):
-                        src_cls = wf.get(src_id, {}).get('class_type', '')
-                        if src_cls != 'SageAttentionT4_Apply':
-                            connections.append((src_id, nid, src_slot))
-
-            if not connections:
-                continue
-
-            max_id = max((int(k) for k in wf if k.isdigit()), default=0)
-            next_id = max_id + 1
-
-            groups = _dd(list)
-            for src, tgt, slot in connections:
-                groups[src].append((tgt, slot))
-
-            for src_id, consumers in groups.items():
-                sage_id = str(next_id)
-                next_id += 1
-                wf[sage_id] = {
-                    'class_type': 'SageAttentionT4_Apply',
-                    'inputs': {
-                        'model': [src_id, 0],
-                        'smooth_k': True,
-                        'enable': True,
-                    }
-                }
-                for tgt_id, slot in consumers:
-                    wf[tgt_id]['inputs']['model'] = [sage_id, 0]
-                modified += 1
-
-            with open(fpath, 'w', encoding='utf-8') as f:
-                _json.dump(wf, f, indent=2, ensure_ascii=False)
-            log(f'  {fname}: injected {len(groups)} SageAttention-T4 node(s)')
-
-        except (_json.JSONDecodeError, KeyError, ValueError) as e:
-            warn(f'  {fname}: {e} (skip)')
-
-    if modified:
-        log(f'Всего вставлено SageAttention-T4 в {modified} workflow(ов)')
-    else:
-        log('Workflow без model-соединений — добавь ноду вручную')
+    run([sys.executable, injector, workflows_dir], check=False)
 
 
 def main():

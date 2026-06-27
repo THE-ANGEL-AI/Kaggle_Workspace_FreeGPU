@@ -50,7 +50,7 @@ import kaggle_env as ke
 from kaggle_env import (
     HOME_DIR, COMFY_DIR, VENV_PYTHON,
     log, warn, step, run, uv_pip_install,
-    install_python, venv_python_ok,
+    install_python,
 )
 
 # ----------------------------------------------------------------------
@@ -64,19 +64,6 @@ TORCH_INDEX  = "https://download.pytorch.org/whl/cu130"  # CUDA 13.0
 
 COMFYUI_REPO = "https://github.com/Comfy-Org/ComfyUI.git"
 MANAGER_REPO = "https://github.com/ltdrdata/ComfyUI-Manager.git"
-
-
-def torch_cuda_ok():
-    """torch уже стоит в venv и видит CUDA? Тогда переустановка не нужна."""
-    if not venv_python_ok():
-        return False
-    try:
-        subprocess.run(
-            [VENV_PYTHON, "-c", "import torch; assert torch.cuda.is_available()"],
-            check=True, capture_output=True, timeout=120)
-        return True
-    except (subprocess.SubprocessError, OSError):
-        return False
 
 
 # ----------------------------------------------------------------------
@@ -103,7 +90,7 @@ def setup_uv_venv():
 # ----------------------------------------------------------------------
 def install_torch():
     step("PyTorch для CUDA 13.0 (cu130)")
-    if torch_cuda_ok():
+    if ke.torch_cuda_ok():
         log("torch с рабочей CUDA уже установлен (переустановка пропущена)")
     else:
         uv_pip_install(

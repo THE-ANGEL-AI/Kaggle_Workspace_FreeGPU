@@ -64,10 +64,7 @@ import kaggle_env as ke
 ke.setup_env()
 
 # Импортируем утилиты из общего модуля
-from kaggle_env import (
-    COMFY_DIR, VENV_PYTHON, UV_LOCAL_DIR,
-    torch_cuda_ok, venv_python_ok,
-)
+from kaggle_env import torch_cuda_ok
 
 # ----------------------------------------------------------------------
 # Пути и параметры
@@ -237,11 +234,11 @@ class ComfyLauncher:
         body = html.escape("\n".join(lines))
         return (
             "<pre style='margin:0; padding:6px; white-space:pre-wrap; "
-            "word-break:break-all; overflow-x:auto; overflow-y:auto; "
+            "word-break:break-word; overflow-wrap:anywhere; overflow-x:auto; overflow-y:auto; "
             "max-height:100%; box-sizing:border-box; "
             "background:#0f1117; color:#ddd; "
             "font-family:monospace; font-size:12px; line-height:1.35; "
-            "min-height:100%; height:100%;'>" + body + "</pre>"
+            "min-height:100%;'>" + body + "</pre>"
         )
 
     # ------------------------------------------------------------------
@@ -355,32 +352,32 @@ class ComfyLauncher:
     def _check_git_updates(self):
         """Проверяет обновления скриптов из git-репозитория THE-ANGEL-AI.
 
-        Если instal/ — это git-клон, делает fetch + pull с ветки GIT_BRANCH.
-        Если обновления есть — перекачивает файлы и сообщает в лог.
+        Если instal/ — это часть git-клона, делает fetch + pull с ветки GIT_BRANCH.
         Если это не git-репозиторий или нет доступа — пропускает молча.
         """
         self._print("[*] Проверяю обновления скриптов (THE-ANGEL-AI)...")
         self._set_status("🔄 Проверка обновлений...", "#f39c12")
 
-        # Проверяем, что _THIS_DIR — git-репозиторий.
-        git_dir = os.path.join(_THIS_DIR, ".git")
-        if not os.path.isdir(git_dir):
-            # Это не git-клон (может, скрипты скопированы вручную) — пропускаем.
+        # Определяем корень git-репозитория
+        try:
+            result = subprocess.run(
+                ["git", "-C", _THIS_DIR, "rev-parse", "--show-toplevel"],
+                capture_output=True, text=True, timeout=10, check=True)
+            repo_root = result.stdout.strip()
+        except (subprocess.CalledProcessError, OSError, subprocess.TimeoutExpired):
             self._print("[*] Это не git-клон — пропускаю проверку обновлений")
             return
 
         try:
-            # Fetch + pull: забираем последние коммиты.
             fetch = subprocess.run(
-                ["git", "-C", _THIS_DIR, "fetch", "--quiet"],
+                ["git", "-C", repo_root, "fetch", "--quiet"],
                 capture_output=True, text=True, timeout=30)
             if fetch.returncode != 0:
                 self._print(f"[!] git fetch не удался: {fetch.stderr.strip()}")
                 return
 
-            # Сравниваем локальный HEAD с origin/BRANCH — есть ли разница?
             status = subprocess.run(
-                ["git", "-C", _THIS_DIR, "status", "-sb"],
+                ["git", "-C", repo_root, "status", "-sb"],
                 capture_output=True, text=True, timeout=15)
             behind = "behind" in (status.stdout + status.stderr)
 
@@ -392,7 +389,7 @@ class ComfyLauncher:
             self._set_status("⚙️ Скачиваю обновления...", "#f39c12")
             self._print("[*] Найдены обновления — скачиваю...")
             pull = subprocess.run(
-                ["git", "-C", _THIS_DIR, "pull", "--ff-only"],
+                ["git", "-C", repo_root, "pull", "--ff-only"],
                 capture_output=True, text=True, timeout=30)
             if pull.returncode != 0:
                 self._print(f"[!] git pull не удался: {pull.stderr.strip()}")
@@ -491,13 +488,6 @@ class ComfyLauncher:
                             "установщик (пакеты из uv-кэша)")
                 self._run_installer()
 
-                self._set_status("⚙️ Переустанавливаю зависимости "
-                                 "кастомных нод...", "#f39c12")
-                self._print("[!] venv пересоздан — переустанавливаю "
-                            "зависимости кастомных нод "
-                            "(иначе упадут с ImportError)")
-                self._run_node_installer()
-
         for path, msg in (
             (COMFY_DIR, "ComfyUI не найден — запусти instal/instal_comfyui.py"),
             (f"{COMFY_DIR}/main.py", "main.py не найден"),
@@ -509,15 +499,14 @@ class ComfyLauncher:
         # Проверка torch: venv цел, но torch не видит CUDA
         # (например, после прерванной KeyboardInterrupt установки).
         if not torch_cuda_ok():
-            self._set_status("⚙️ torch не видит CUDA — переустанавливаю...",
+            self._set_status("⚙️ torch не видит CUDA — устанавливаю...",
                              "#f39c12")
-            self._print("[!] torch не видит CUDA — запускаю установщик "
-                        "(прерванная установка?)")
+            self._print("[!] torch не видит CUDA — запускаю установщик")
             self._run_installer()
-            self._set_status("⚙️ Переустанавливаю зависимости "
+            self._set_status("⚙️ Устанавливаю зависимости "
                              "кастомных нод...", "#f39c12")
-            self._print("[!] torch переустановлен — переустанавливаю "
-                        "зависимости кастомных нод")
+            self._print("[!] Переустанавливаю зависимости "
+                        "кастомных нод")
             self._run_node_installer()
 
         # Кастомные ноды (ШАГ 2). Если каких-то нод из списка нет —

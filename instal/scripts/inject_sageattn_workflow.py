@@ -14,7 +14,7 @@ import json
 import os
 import sys
 from collections import defaultdict
-from typing import Dict, Any, List, Tuple
+from typing import List, Tuple
 
 
 # Nodes that produce model outputs (loaders).
@@ -84,8 +84,7 @@ def inject_sageattn(workflow: dict):
             }
         }
         for target_id, slot in consumers:
-            if target_id in workflow:
-                workflow[target_id]['inputs']['model'] = [sage_id, 0]
+            workflow[target_id]['inputs']['model'] = [sage_id, 0]
         injected += 1
 
     return workflow, injected
