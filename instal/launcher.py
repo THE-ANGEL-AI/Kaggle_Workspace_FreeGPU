@@ -606,7 +606,8 @@ class ComfyLauncher:
                 except Exception:
                     pass
         except KeyboardInterrupt:
-            print("[*] Interrupt — останавливаю ComfyUI и туннель...", flush=True)
+            print("[!] Interrupt — останавливаю ComfyUI и туннель...", flush=True)
+            self._starting = False      # сбрасываем — _startup() мог не успеть
             self._kill_processes()
             self.logger.hide_url()
             self.logger.set_status("🛑 ComfyUI остановлен. Нажми «Перезапустить».",
