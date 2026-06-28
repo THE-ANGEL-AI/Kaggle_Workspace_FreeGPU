@@ -558,6 +558,7 @@ class ComfyLauncher:
         if self.stopped:
             return
         self.stopped = True
+        self._starting = False       # сброс — чтобы Restart не игнорировался
         self.logger.set_status("⏳ Останавливаю ComfyUI...", "#f39c12")
         self.logger.disable_stop_btn()
         self._kill_processes()
@@ -572,6 +573,7 @@ class ComfyLauncher:
     def _on_restart(self):
         if self._starting:
             return
+        self._starting = True           # блокируем двойной клик
         self.logger.disable_restart_btn()
         self.logger.set_status("🔄 Перезапуск ComfyUI...", "#f39c12")
         self.logger.print("[*] Перезапуск: гашу старые процессы...")
