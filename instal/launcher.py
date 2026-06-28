@@ -27,6 +27,7 @@ import subprocess
 import sys
 import time
 import traceback
+from datetime import datetime
 from threading import Event, Thread
 
 # Общий модуль — единый источник путей
@@ -74,6 +75,26 @@ class ComfyLauncher:
         self.logger.on_restart_callback = self._on_restart
 
     # ------------------------------------------------------------------
+    # Helpers консольного логирования
+    # ------------------------------------------------------------------
+
+    def _log_step(self, name, status=None):
+        """Отмечает начало шага: разделитель + таймер + статус.
+        Возвращает time.time() для замера длительности."""
+        ts = datetime.now().strftime("%H:%M:%S")
+        self.logger.print(f"\n{'='*60}")
+        self.logger.print(f"  [{ts}] {name}")
+        self.logger.print(f"{'='*60}")
+        if status:
+            self.logger.set_status(status, "#f39c12")
+        return time.time()
+
+    def _log_elapsed(self, start, msg="✓ Шаг завершён"):
+        """Логирует время, прошедшее с start."""
+        elapsed = time.time() - start
+        self.logger.print(f"[{msg}] ({elapsed:.1f}с)")
+
+    # ------------------------------------------------------------------
     # Публичная точка входа
     # ------------------------------------------------------------------
     def launch(self):
@@ -95,6 +116,11 @@ class ComfyLauncher:
         self._starting = True
         self.logger.stop_btn.disabled = False
         self.logger.restart_btn.disabled = True
+        _t_startup = time.time()
+
+        self.logger.print(f"\n{'='*60}")
+        self.logger.print(f"  ComfyUI Launcher · {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        self.logger.print(f"{'='*60}")
         try:
             self._cleanup_old()
             self._check_git_updates()
@@ -104,13 +130,18 @@ class ComfyLauncher:
             self._start_comfy()
             self._wait_for_port()
             self._start_tunnel()
+            total = time.time() - _t_startup
+            self.logger.print(f"\n{'='*60}")
+            self.logger.print(f"  ✅ Полный запуск за {total:.1f}с")
+            self.logger.print(f"{'='*60}")
         except Exception as e:
-            # При ошибке убиваем ВСЕ уже запущенные процессы
             self._kill_processes()
             self.logger.set_status(f"❌ Ошибка запуска: {e}", "#e74c3c")
-            # Полный traceback в лог — чтобы видеть, где именно упало
+            elapsed = time.time() - _t_startup
+            self.logger.print(f"\n{'='*60}")
+            self.logger.print(f"  ❌ Ошибка на {elapsed:.0f}с: {e}")
+            self.logger.print(f"{'='*60}")
             self.logger.print(f"[ERROR] {e}\n{traceback.format_exc()}")
-            # И в консоль (если кто-то смотрит stdout ячейки)
             traceback.print_exc()
         finally:
             self._starting = False
@@ -120,24 +151,45 @@ class ComfyLauncher:
     # 1. Убиваем старые процессы и чистим блокировки
     # ------------------------------------------------------------------
     def _cleanup_old(self):
-        self.logger.print("[*] Очистка старых процессов...")
+        t0 = self._log_step("Шаг 1/7: Очистка старых процессов и блокировок")
+        total_killed = 0
         for pat in ("main.py", "comfyui", "cloudflared"):
-            subprocess.run(["pkill", "-9", "-f", pat], capture_output=True)
+            try:
+                pgrep = subprocess.run(
+                    ["pgrep", "-f", pat],
+                    capture_output=True, text=True)
+                if pgrep.returncode == 0 and pgrep.stdout.strip():
+                    pids = pgrep.stdout.strip().splitlines()
+                    self.logger.print(f"  → {pat}: найдено PID: {', '.join(pids)}")
+                    total_killed += len(pids)
+                subprocess.run(["pkill", "-9", "-f", pat],
+                               capture_output=True)
+            except OSError:
+                pass
+        if total_killed == 0:
+            self.logger.print("  → Старых процессов не найдено")
+        else:
+            self.logger.print(f"  → Убито процессов: {total_killed}")
         time.sleep(2)
+        removed = 0
         for f in (f"{COMFY_DIR}/user/comfyui.db",
                   f"{COMFY_DIR}/user/comfyui.db-journal"):
             try:
                 if os.path.exists(f):
                     os.remove(f)
-            except OSError:
-                pass
+                    self.logger.print(f"  → Удалён файл: {os.path.basename(f)}")
+                    removed += 1
+            except OSError as e:
+                self.logger.print(f"  → Не удалён {os.path.basename(f)}: {e}")
+        if removed == 0:
+            self.logger.print("  → Файлов блокировок нет")
+        self._log_elapsed(t0)
 
     # ------------------------------------------------------------------
     # 1b. Проверка обновлений из git-репозитория
     # ------------------------------------------------------------------
     def _check_git_updates(self):
-        self.logger.print("[*] Проверяю обновления скриптов (THE-ANGEL-AI)...")
-        self.logger.set_status("🔄 Проверка обновлений...", "#f39c12")
+        t0 = self._log_step("Шаг 2/7: Проверка обновлений скриптов (git)")
 
         try:
             result = subprocess.run(
@@ -145,19 +197,31 @@ class ComfyLauncher:
                 capture_output=True, text=True, timeout=10, check=True)
             repo_root = result.stdout.strip()
         except (subprocess.CalledProcessError, OSError, subprocess.TimeoutExpired):
-            self.logger.print("[*] Это не git-клон — пропускаю проверку обновлений")
+            self.logger.print("  → Это не git-клон — пропускаю")
+            self._log_elapsed(t0)
             return
 
         try:
+            # Текущая позиция
+            branch = subprocess.run(["git", "-C", repo_root, "rev-parse",
+                                     "--abbrev-ref", "HEAD"],
+                                    capture_output=True, text=True, timeout=5)
+            commit = subprocess.run(["git", "-C", repo_root, "rev-parse",
+                                     "--short", "HEAD"],
+                                    capture_output=True, text=True, timeout=5)
+            self.logger.print(f"  → Ветка: {branch.stdout.strip()}")
+            self.logger.print(f"  → Коммит: {commit.stdout.strip()}")
+
             # GIT_TERMINAL_PROMPT=0 — не ждать интерактивного ввода
-            # (пароль/токен), если репозиторий требует аутентификации.
             fetch_env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+            self.logger.print("  → Fetch...")
             fetch = subprocess.run(
                 ["git", "-C", repo_root, "fetch", "--quiet"],
                 capture_output=True, text=True, timeout=30,
                 env=fetch_env)
             if fetch.returncode != 0:
-                self.logger.print(f"[!] git fetch не удался: {fetch.stderr.strip()}")
+                self.logger.print(f"  → git fetch: {fetch.stderr.strip()}")
+                self._log_elapsed(t0)
                 return
 
             status = subprocess.run(
@@ -166,73 +230,84 @@ class ComfyLauncher:
             behind = "behind" in (status.stdout + status.stderr)
 
             if not behind:
-                self.logger.print("[*] Скрипты обновлены (всё актуально)")
+                self.logger.print("  → Актуально, обновлений нет")
                 self.logger.set_status("✅ Скрипты обновлены", "#27ae60")
+                self._log_elapsed(t0)
                 return
 
+            self.logger.print("  → Найдены новые коммиты — git pull...")
             self.logger.set_status("⚙️ Скачиваю обновления...", "#f39c12")
-            self.logger.print("[*] Найдены обновления — скачиваю...")
             pull = subprocess.run(
                 ["git", "-C", repo_root, "pull", "--ff-only"],
                 capture_output=True, text=True, timeout=30)
             if pull.returncode != 0:
-                self.logger.print(f"[!] git pull не удался: {pull.stderr.strip()}")
+                self.logger.print(f"  → git pull: {pull.stderr.strip()}")
+                self._log_elapsed(t0)
                 return
-            self.logger.print(f"[OK] Скрипты обновлены:\n{pull.stdout.strip()}")
-            self.logger.set_status("✅ Скрипты обновлены до последней версии", "#27ae60")
+
+            log = subprocess.run(
+                ["git", "-C", repo_root, "log", "--oneline", f"{commit.stdout.strip()}..HEAD"],
+                capture_output=True, text=True, timeout=5)
+            n = len([l for l in log.stdout.splitlines() if l.strip()])
+            self.logger.print(f"  → Загружено {n} новых коммитов")
+            self.logger.set_status("✅ Скрипты обновлены", "#27ae60")
         except subprocess.TimeoutExpired:
-            self.logger.print("[!] Таймаут git-операции — пропускаю обновление")
+            self.logger.print("  → Таймаут git-операции — пропускаю")
         except Exception as e:
-            self.logger.print(f"[!] Ошибка при проверке обновлений: {e}")
+            self.logger.print(f"  → Ошибка: {e}")
+        self._log_elapsed(t0)
 
     # ------------------------------------------------------------------
     # 2. Проверка файлов и окружения
     # ------------------------------------------------------------------
     def _check_files(self):
-        # venv пропал или битый (типично после рестарта сессии Kaggle)
+        t0 = self._log_step("Шаг 3/7: Проверка файлов и окружения")
+
+        # --- venv ---
+        self.logger.print("  ── Проверка Python-окружения ──")
         if not ke.venv_python_ok():
-            self.logger.set_status("⚙️ venv нерабочий — чиню Python-окружение...", "#f39c12")
-            self.logger.print("[!] venv нерабочий — запускаю kaggle_env.install_python()")
+            self.logger.print("  ❌ venv битый — запускаю install_python()")
             try:
                 was_ok = ke.install_python()
             except Exception as exc:
-                self.logger.print(f"[!] install_python() упал: {exc}")
+                self.logger.print(f"  ❌ install_python() упал: {exc}")
                 raise RuntimeError(
-                    "Ошибка при установке Python-окружения — смотри лог выше") from exc
-
+                    "Ошибка при установке Python-окружения") from exc
             if not ke.venv_python_ok():
-                raise RuntimeError("venv так и не заработал — смотри лог выше")
-
+                raise RuntimeError("venv не заработал — смотри лог выше")
+            self.logger.print("  ✅ venv восстановлен")
             if not was_ok:
-                self.logger.set_status("⚙️ Устанавливаю torch и зависимости ComfyUI...", "#f39c12")
-                self.logger.print("[!] venv пересоздан — устанавливаю torch через установщик")
+                self.logger.print("  → venv пересоздан — устанавливаю torch")
                 self.logger.stream_script(INSTALLER, "INSTALL",
                     "Запусти вручную: !python instal/instal_comfyui.py")
+        else:
+            self.logger.print("  ✅ venv в порядке")
 
-        # Если ComfyUI не установлен — авто-установка через instal_comfyui.py.
-        # Скрипт ИДЕМПОТЕНТЕН: если всё уже есть — пропустит лишнюю работу.
+        # --- ComfyUI ---
+        self.logger.print("  ── Проверка ComfyUI ──")
         if not os.path.exists(f"{COMFY_DIR}/main.py"):
-            self.logger.set_status("⚙️ ComfyUI не найден — устанавливаю...", "#f39c12")
-            self.logger.print("[!] ComfyUI не найден — запускаю instal_comfyui.py")
+            self.logger.print("  ❌ ComfyUI не найден — авто-установка")
             self.logger.stream_script(INSTALLER, "INSTALL",
                 "Запусти вручную: !python instal/instal_comfyui.py")
-            self.logger.print("[*] ComfyUI установлен")
+            self.logger.print("  ✅ ComfyUI установлен")
+        else:
+            self.logger.print("  ✅ ComfyUI на месте")
 
-        self.logger.print("[*] Файлы ComfyUI и рабочий venv на месте")
-
-        # Проверка torch: venv цел, но torch не видит CUDA
+        # --- torch / CUDA ---
+        self.logger.print("  ── Проверка torch/CUDA ──")
         if not ke.torch_cuda_ok():
-            self.logger.set_status("⚙️ torch не видит CUDA — устанавливаю...", "#f39c12")
-            self.logger.print("[!] torch не видит CUDA — запускаю установщик")
+            self.logger.print("  ❌ torch не видит CUDA — переустановка")
             self.logger.stream_script(INSTALLER, "INSTALL",
                 "Запусти вручную: !python instal/instal_comfyui.py")
-            self.logger.set_status("⚙️ Устанавливаю зависимости кастомных нод...", "#f39c12")
-            self.logger.print("[!] Переустанавливаю зависимости кастомных нод")
+            self.logger.print("  → Переустанавливаю зависимости нод")
             self.logger.stream_script(NODE_INSTALLER, "NODES",
                 "Запусти вручную: !python instal/instal_castom_node.py")
+        else:
+            self.logger.print("  ✅ torch/CUDA в порядке")
 
-        # Кастомные ноды
+        # --- Кастомные ноды ---
         self._check_nodes()
+        self._log_elapsed(t0)
 
     # --- 2b. проверка и авто-обновление кастомных нод ---
     def _load_node_names(self):
@@ -315,28 +390,37 @@ class ComfyLauncher:
     # 3. cloudflared
     # ------------------------------------------------------------------
     def _ensure_cloudflared(self):
+        t0 = self._log_step("Шаг 4/7: Cloudflared (туннель)")
+
         url = ("https://github.com/cloudflare/cloudflared/releases/latest/"
                "download/cloudflared-linux-amd64")
-        too_small = (os.path.exists(CLOUDFLARED)
-                     and os.path.getsize(CLOUDFLARED) < 5_000_000)
-        if not os.path.exists(CLOUDFLARED) or too_small:
-            if too_small:
-                self.logger.print("[*] cloudflared битый/недокачан — качаю заново...")
+        if not os.path.exists(CLOUDFLARED):
+            self.logger.print("  → Не найден — скачиваю...")
+            subprocess.run(["wget", "-q", url, "-O", CLOUDFLARED], check=True)
+            size_mb = os.path.getsize(CLOUDFLARED) / 1024 / 1024
+            self.logger.print(f"  → Скачан: {size_mb:.1f} MB")
+        else:
+            size_mb = os.path.getsize(CLOUDFLARED) / 1024 / 1024
+            self.logger.print(f"  → Уже есть: {size_mb:.1f} MB")
+            if size_mb < 5:
+                self.logger.print("  → Размер подозрительно мал — качаю заново")
                 try:
                     os.remove(CLOUDFLARED)
                 except OSError:
                     pass
-            else:
-                self.logger.print("[*] Скачиваю cloudflared...")
-            subprocess.run(["wget", "-q", url, "-O", CLOUDFLARED], check=True)
+                subprocess.run(["wget", "-q", url, "-O", CLOUDFLARED], check=True)
+                size_mb = os.path.getsize(CLOUDFLARED) / 1024 / 1024
+                self.logger.print(f"  → Скачан: {size_mb:.1f} MB")
+
         os.chmod(CLOUDFLARED, 0o755)
-        self.logger.print("[*] cloudflared готов (+x выставлен)")
+        self.logger.print("  → Права доступа: 755 (+x)")
+        self._log_elapsed(t0)
 
     # ------------------------------------------------------------------
     # 3b. SageAttention-SM75 (Turing)
     # ------------------------------------------------------------------
     def _install_sage_attention(self):
-        """Устанавливает SageAttention через sage_installer."""
+        t0 = self._log_step("Шаг 5/7: SageAttention-SM75 (Turing)")
         self.sage_ok = sage_installer.install(
             home_dir=HOME_DIR,
             venv_python=VENV_PYTHON,
@@ -344,19 +428,21 @@ class ComfyLauncher:
             logger=self.logger,
         )
         if self.sage_ok:
-            # Инжект SageAttention в workflow
             sage_installer.inject_into_workflows(COMFY_DIR, self.logger)
             self.logger.set_status("SageAttention-SM75 ready", "#27ae60")
+        else:
+            self.logger.print("  → SageAttention не установлен (использую split-cross-attention)")
+        self._log_elapsed(t0)
 
     # ------------------------------------------------------------------
     # 4. Запуск ComfyUI
     # ------------------------------------------------------------------
     def _start_comfy(self):
-        self.logger.set_status("⏳ Запуск ComfyUI...", "#f39c12")
+        self._log_step("Шаг 6/7: Запуск ComfyUI", status="⏳ Запуск ComfyUI...")
         if self.sage_ok:
-            self.logger.print("[*] Attention: SageAttention-T4 (ComfyUI custom node)")
+            self.logger.print("  → Attention: SageAttention-T4 (custom node)")
         else:
-            self.logger.print("[*] Attention: --use-split-cross-attention (SageAttention не установлен)")
+            self.logger.print("  → Attention: --use-split-cross-attention (SageAttention не установлен)")
 
         comfy_args = [
             VENV_PYTHON, "main.py",
@@ -369,6 +455,9 @@ class ComfyLauncher:
         if not self.sage_ok:
             comfy_args.append("--use-split-cross-attention")
 
+        cmd_str = " ".join(comfy_args)
+        self.logger.print(f"  → Команда: {cmd_str}")
+
         self.comfy_proc = subprocess.Popen(
             comfy_args,
             cwd=COMFY_DIR,
@@ -377,6 +466,7 @@ class ComfyLauncher:
             text=True,
             bufsize=1,
         )
+        self.logger.print(f"  → PID: {self.comfy_proc.pid}")
         Thread(target=self.logger.stream_process,
                args=(self.comfy_proc, "[COMFY] "),
                daemon=True).start()
@@ -385,8 +475,10 @@ class ComfyLauncher:
     # 5. Ожидание порта
     # ------------------------------------------------------------------
     def _wait_for_port(self):
-        self.logger.print("[*] Ожидание запуска сервера...")
+        self.logger.print(f"\n{'─'*40}")
+        self.logger.print("  Ожидание запуска ComfyUI...")
         start = time.time()
+        last_report = 0
         while True:
             if self.comfy_proc.poll() is not None:
                 raise RuntimeError(
@@ -396,9 +488,15 @@ class ComfyLauncher:
                     break
             except OSError:
                 pass
-            if time.time() - start > STARTUP_TIMEOUT:
-                raise RuntimeError(f"Таймаут запуска ComfyUI ({STARTUP_TIMEOUT}с)")
+            elapsed = time.time() - start
+            if elapsed > STARTUP_TIMEOUT:
+                raise RuntimeError(f"Таймаут ({STARTUP_TIMEOUT}с)")
+            if elapsed - last_report >= 10:
+                self.logger.print(f"  ⏳ {elapsed:.0f}с прошло (таймаут {STARTUP_TIMEOUT}с)")
+                last_report = elapsed
             time.sleep(2)
+        elapsed = time.time() - start
+        self.logger.print(f"  ✅ ComfyUI запущен за {elapsed:.1f}с")
         self.logger.set_status("✅ ComfyUI запущен, поднимаю туннель...", "#27ae60")
 
     # ------------------------------------------------------------------
@@ -424,17 +522,23 @@ class ComfyLauncher:
             pass
 
     def _start_tunnel(self):
+        self._log_step("Шаг 7/7: Cloudflare Tunnel", status="🔄 Поднимаю туннель...")
+
+        cmd = [
+            CLOUDFLARED, "tunnel", "--no-autoupdate",
+            "--protocol", "http2",
+            "--url", f"http://127.0.0.1:{PORT}",
+        ]
+        self.logger.print(f"  → Команда: {' '.join(cmd)}")
+
         self.tunnel_proc = subprocess.Popen(
-            [
-                CLOUDFLARED, "tunnel", "--no-autoupdate",
-                "--protocol", "http2",
-                "--url", f"http://127.0.0.1:{PORT}",
-            ],
+            cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
         )
+        self.logger.print(f"  → PID: {self.tunnel_proc.pid}")
 
         # Читаем stdout туннеля в фоновом потоке — неблокирующий таймаут
         url_found = Event()
@@ -445,17 +549,20 @@ class ComfyLauncher:
         )
         reader.start()
 
-        # Ждём URL с таймаутом (readline в фоне не блокирует этот цикл)
+        # Ждём URL с таймаутом
+        start = time.time()
         found = url_found.wait(timeout=URL_TIMEOUT)
+        elapsed = time.time() - start
 
         if not found and self.tunnel_proc.poll() is not None:
             raise RuntimeError("Процесс туннеля завершился, URL не получен")
 
         if self.public_url:
+            self.logger.print(f"  ✅ Туннель получен за {elapsed:.1f}с")
             self.logger.show_url(self.public_url)
             self.logger.set_status("✅ ComfyUI доступен!", "#27ae60")
         else:
-            self.logger.set_status("⚠️ Туннель поднят, но ссылку найти не удалось — "
+            self.logger.set_status("⚠️ Туннель поднят, но ссылка не найдена — "
                                    "проверь лог", "#f39c12")
 
     # ------------------------------------------------------------------
