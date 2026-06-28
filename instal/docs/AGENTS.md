@@ -98,8 +98,8 @@ comfy_args = [
 ```
 
 - `--preview-method auto` — авто-превью в ComfyUI
-- Attention: **SDPA (torch default)** — эффективнее split-cross-attention на втором проходе.
-- `--use-split-cross-attention` — убран: вызывал OOM на втором проходе 720p видео.
+- Attention: **SDPA (torch default)** — ✅ проверено: 720p видео (2 прохода) без OOM.
+- `--use-split-cross-attention` — убран: вызывал `torch.OutOfMemoryError` на втором проходе 720p.
 - Если OOM-killer (SIGKILL -9) при загрузке модели — вернуть `--use-split-cross-attention`.
 
 ### 5. Другие флаги — НЕ ДОБАВЛЯТЬ
