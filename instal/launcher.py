@@ -38,6 +38,9 @@ from kaggle_env import (
 # UI + логи
 from logging_ui import LogManager
 
+# SageAttention-SM75 (Turing T4) — сборка + custom node
+import sage_installer
+
 
 
 # Путь к скриптам установщиков
@@ -65,6 +68,7 @@ class ComfyLauncher:
         self.public_url = None
         self.stopped = False
         self._starting = False
+        self.sage_ok = False
         # UI + логи
         self.logger = LogManager()
         self.logger.on_stop_callback = self._on_stop
@@ -116,6 +120,7 @@ class ComfyLauncher:
             self._check_git_updates()
             self._check_files()
             self._ensure_cloudflared()
+            self._install_sage_attention()
             self._start_comfy()
             self._wait_for_port()
             self._start_tunnel()
@@ -405,11 +410,38 @@ class ComfyLauncher:
         self._log_elapsed(t0)
 
     # ------------------------------------------------------------------
-    # 4. Запуск ComfyUI
+    # 4b. SageAttention-SM75 (Turing T4) — кастомная нода attention
+    # ------------------------------------------------------------------
+    def _install_sage_attention(self):
+        """Устанавливает SageAttention-SM75-path в venv + custom node.
+
+        Если установлен — ComfyUI использует его вместо SDPA/split-cross-attention.
+        Если не установился — fallback на SDPA (без --use-split-cross-attention).
+        """
+        try:
+            self.sage_ok = sage_installer.install(
+                home_dir=ke.HOME_DIR,
+                venv_python=ke.VENV_PYTHON,
+                comfy_dir=ke.COMFY_DIR,
+                logger=self.logger,
+            )
+            if self.sage_ok:
+                self.logger.print("  → SageAttention-SM75 active — "
+                                  "attention через кастомную ноду T4")
+        except Exception as e:
+            self.sage_ok = False
+            self.logger.print(f"  → SageAttention: ошибка установки ({e}), "
+                              "пропуск — SDPA")
+
+    # ------------------------------------------------------------------
+    # 5. Запуск ComfyUI
     # ------------------------------------------------------------------
     def _start_comfy(self):
-        self._log_step("Шаг 5/6: Запуск ComfyUI", status="⏳ Запуск ComfyUI...")
-        self.logger.print("  → Режим: split-cross-attention (экономия VRAM на T4)")
+        self._log_step("Шаг 6/7: Запуск ComfyUI", status="⏳ Запуск ComfyUI...")
+        if self.sage_ok:
+            self.logger.print("  → Attention: SageAttention-SM75 (T4 custom node)")
+        else:
+            self.logger.print("  → Attention: torch SDPA (default)")
 
         # Отключаем comfy-aimdo — на Kaggle его асинхронное чтение файлов
         # сыпет hostbuf_file_reader_read failed → CUDA illegal memory access.
@@ -499,7 +531,7 @@ class ComfyLauncher:
             pass
 
     def _start_tunnel(self):
-        self._log_step("Шаг 6/6: Cloudflare Tunnel", status="🔄 Поднимаю туннель...")
+        self._log_step("Шаг 7/7: Cloudflare Tunnel", status="🔄 Поднимаю туннель...")
 
         cmd = [
             CLOUDFLARED, "tunnel", "--no-autoupdate",
