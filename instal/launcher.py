@@ -26,7 +26,7 @@ import socket
 import subprocess
 import sys
 import time
-from threading import Thread
+from threading import Event, Thread
 
 # Общий модуль — единый источник путей
 import kaggle_env as ke
@@ -104,6 +104,8 @@ class ComfyLauncher:
             self._wait_for_port()
             self._start_tunnel()
         except Exception as e:
+            # При ошибке убиваем ВСЕ уже запущенные процессы
+            self._kill_processes()
             self.logger.set_status(f"❌ Ошибка запуска: {e}", "#e74c3c")
             self.logger.print(f"[ERROR] {e}")
         finally:
@@ -143,9 +145,13 @@ class ComfyLauncher:
             return
 
         try:
+            # GIT_TERMINAL_PROMPT=0 — не ждать интерактивного ввода
+            # (пароль/токен), если репозиторий требует аутентификации.
+            fetch_env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
             fetch = subprocess.run(
                 ["git", "-C", repo_root, "fetch", "--quiet"],
-                capture_output=True, text=True, timeout=30)
+                capture_output=True, text=True, timeout=30,
+                env=fetch_env)
             if fetch.returncode != 0:
                 self.logger.print(f"[!] git fetch не удался: {fetch.stderr.strip()}")
                 return
@@ -394,6 +400,25 @@ class ComfyLauncher:
     # ------------------------------------------------------------------
     # 6. Cloudflare-туннель + парсинг URL
     # ------------------------------------------------------------------
+    def _read_tunnel_output(self, url_found: Event):
+        """Читает stdout туннеля в фоне, ищет URL.
+
+        Вынесено в отдельный поток, чтобы блокирующий readline()
+        не мешал таймауту _start_tunnel().
+        """
+        try:
+            for line in iter(self.tunnel_proc.stdout.readline, ""):
+                if line:
+                    self.logger.print(f"[TUNNEL] {line.rstrip()}")
+                    m = re.search(r"https://[^\s]+trycloudflare\.com", line)
+                    if m:
+                        self.public_url = m.group(0)
+                        url_found.set()
+                if self.tunnel_proc.poll() is not None:
+                    break
+        except (OSError, ValueError):
+            pass
+
     def _start_tunnel(self):
         self.tunnel_proc = subprocess.Popen(
             [
@@ -407,23 +432,20 @@ class ComfyLauncher:
             bufsize=1,
         )
 
-        start = time.time()
-        while time.time() - start < URL_TIMEOUT:
-            if self.tunnel_proc.poll() is not None:
-                raise RuntimeError("Процесс туннеля завершился")
-            line = self.tunnel_proc.stdout.readline()
-            if not line:
-                continue
-            self.logger.print(f"[TUNNEL] {line.rstrip()}")
-            m = re.search(r"https://[^\s]+trycloudflare\.com", line)
-            if m:
-                self.public_url = m.group(0)
-                break
+        # Читаем stdout туннеля в фоновом потоке — неблокирующий таймаут
+        url_found = Event()
+        reader = Thread(
+            target=self._read_tunnel_output,
+            args=(url_found,),
+            daemon=True,
+        )
+        reader.start()
 
-        # Остаток логов туннеля — в фон
-        Thread(target=self.logger.stream_process,
-               args=(self.tunnel_proc, "[TUNNEL] "),
-               daemon=True).start()
+        # Ждём URL с таймаутом (readline в фоне не блокирует этот цикл)
+        found = url_found.wait(timeout=URL_TIMEOUT)
+
+        if not found and self.tunnel_proc.poll() is not None:
+            raise RuntimeError("Процесс туннеля завершился, URL не получен")
 
         if self.public_url:
             self.logger.show_url(self.public_url)
@@ -481,8 +503,10 @@ class ComfyLauncher:
         self.logger.hide_url()
         self.logger.url_box.value = "<i style='color:#888'>Публичная ссылка появится здесь...</i>"
 
-        # Запускаем заново (в фоне)
-        self._starting = False
+        # Запускаем заново (в фоне).
+        # _starting выставляем ДО запуска потока, чтобы другой вызов
+        # _on_restart не прошёл guard (self._starting) в race-окне.
+        self._starting = True
         Thread(target=self._startup, daemon=True).start()
 
     # ------------------------------------------------------------------

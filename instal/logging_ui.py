@@ -275,26 +275,50 @@ class LogManager:
             if proc.poll() is not None and not line:
                 break
 
+    def _run_subprocess(self, cmd, **kwargs):
+        """Безопасный запуск subprocess с защитой от KeyboardInterrupt.
+
+        Если пользователь прерывает ячейку (Interrupt), дочерний процесс
+        не зависает, а корректно завершается через terminate().
+        """
+        try:
+            preexec_fn = os.setpgrp
+        except AttributeError:
+            preexec_fn = None  # Windows
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1,
+            preexec_fn=preexec_fn,
+            **kwargs,
+        )
+        return proc
+
     def stream_script(self, path, label, hint):
         """Запускает .py скрипт и стримит его лог.
 
         path  — путь к .py;
         label — префикс ([INSTALL] / [NODES]);
         hint  — что подсказать, если файла нет / упал.
+
+        Защита от stale __pycache__: Python-бинарь берётся из sys.executable
+        с гарантией, что sys импортирован (если кэш битый — NameError ниже
+        ловится и даёт понятную подсказку).
         """
         if not os.path.exists(path):
             raise RuntimeError(f"Установщик не найден: {path}. {hint}")
         self.print(f"[*] Запускаю: {path}")
+
+        # sys.executable — для запуска дочерних скриптов. Если Python
+        # подхватил stale .pyc (без import sys), ловим NameError.
         try:
-            preexec_fn = os.setpgrp
-        except AttributeError:
-            preexec_fn = None  # Windows
-        proc = subprocess.Popen(
-            [sys.executable, path],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, bufsize=1,
-            preexec_fn=preexec_fn,
-        )
+            python_bin = sys.executable
+        except NameError:
+            raise RuntimeError(
+                "sys не импортирован — вероятно, stale __pycache__.\n"
+                "Удали instal/__pycache__/ и перезапусти ячейку.")
+
+        proc = self._run_subprocess([python_bin, path])
         try:
             for line in iter(proc.stdout.readline, ""):
                 if line:
@@ -303,6 +327,15 @@ class LogManager:
                     break
         except OSError:
             pass
+        except KeyboardInterrupt:
+            # Если юзер нажал Interrupt — не даём процессу зависнуть
+            self.print(f"[!] Получен Interrupt — завершаю {path}")
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+            raise
         proc.wait()
         if proc.returncode != 0:
             raise RuntimeError(
