@@ -422,10 +422,11 @@ class ComfyLauncher:
             "--enable-cors-header", "*",
             "--disable-auto-launch",
             "--preview-method", "auto",
-            # --use-split-cross-attention — не ускорение, а совместимость.
-            # На T4 без него дефолтный attention жрёт больше памяти,
-            # и Kaggle OOM-killer шлёт SIGKILL -9.
-            "--use-split-cross-attention",
+            # Без флага attention — ComfyUI использует torch SDPA (на torch 2+).
+            # Раньше был --use-split-cross-attention, но на втором проходе
+            # 720p видео вылетает OOM. SDPA эффективнее по памяти на T4.
+            # Если будет OOM-killer (SIGKILL -9) при загрузке модели —
+            # вернуть --use-split-cross-attention.
         ]
 
         cmd_str = " ".join(comfy_args)
