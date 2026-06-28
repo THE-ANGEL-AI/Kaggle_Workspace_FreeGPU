@@ -589,15 +589,15 @@ class ComfyLauncher:
     # keep-alive: ячейка активна + pump для кнопок
     # ------------------------------------------------------------------
     def _keep_alive(self):
-        """Держит ячейку активной (Kaggle не усыпит) + редкий pump для кнопок.
+        """Держит ячейку активной — Kaggle не усыпит сессию.
 
-        Без блокировки основного потока Kaggle убивает сессию.
-        Раньше pump не работал — делали его слишком часто.
-        Сейчас pump раз в 1с — kernel успевает обработать on_click.
+        Максимально простой цикл: только sleep + flush stdout.
+        Никаких pump — kernel.do_one_iteration(async) не работает
+        из синхронного кода, а кнопки on_click не работают пока
+        ячейка активна. Остановка — ⏹ Interrupt в тулбаре Kaggle.
         """
         print("[*] keep-alive активен — Kaggle не уснёт. "
-              "Кнопки в панели — Остановить / Перезапустить.", flush=True)
-        _last_pump = 0.0
+              "Останови ⏹ (Interrupt) в тулбаре Kaggle.", flush=True)
         try:
             while not self.stopped:
                 time.sleep(0.1)
@@ -605,22 +605,11 @@ class ComfyLauncher:
                     sys.stdout.flush()
                 except Exception:
                     pass
-                # Раз в секунду — даём kernel обработать on_click от кнопок
-                now = time.time()
-                if now - _last_pump >= 1.0:
-                    _last_pump = now
-                    try:
-                        from IPython import get_ipython
-                        ip = get_ipython()
-                        if ip and hasattr(ip, 'kernel') and ip.kernel:
-                            ip.kernel.do_one_iteration()
-                    except Exception:
-                        pass
         except KeyboardInterrupt:
             print("[*] Interrupt — останавливаю ComfyUI и туннель...", flush=True)
             self._kill_processes()
             self.logger.hide_url()
-            self.logger.set_status("🛑 ComfyUI остановлен. Запусти ячейку заново.",
+            self.logger.set_status("🛑 ComfyUI остановлен. Нажми «Перезапустить».",
                                    "#e74c3c")
-            self.logger.print("[*] ComfyUI и туннель остановлены.")
-        self.logger.stop()
+            self.logger.print("[*] ComfyUI и туннель остановлены. "
+                              "Можешь перезапустить кнопкой в панели.")
