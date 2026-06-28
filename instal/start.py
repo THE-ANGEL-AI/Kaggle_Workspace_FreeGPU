@@ -120,6 +120,7 @@ class ComfyLauncher:
         self._log_lines = deque(maxlen=LOG_MAX_LINES)
         self._log_lock = Lock()
         self._log_dirty = False
+        self._log_rendered = 0   # сколько строк уже выведено в Output
 
         self._build_ui()
 
@@ -156,14 +157,12 @@ class ComfyLauncher:
         )
         self.restart_btn.on_click(self._on_restart_click)
 
-        # Лог — обычный HTML-виджет, который мы ПОЛНОСТЬЮ перерисовываем раз в
-        # ~0.5с (а не дёргаем на каждую строку). Содержимое ограничено
-        # LOG_MAX_LINES строками — DOM не раздувается, браузер не виснет.
-        self.log = widgets.HTML(
-            value=self._log_html([]),
+        # Лог — Output виджет. В отличие от HTML, при append не сбрасывает
+        # скролл вверх. Содержимое ограничено LOG_MAX_LINES строками.
+        self.log = widgets.Output(
             layout=widgets.Layout(
                 border="1px solid #444", height="360px",
-                overflow="hidden", padding="0",
+                overflow="auto", padding="6px",
             ),
         )
 
@@ -231,16 +230,10 @@ class ComfyLauncher:
 
     @staticmethod
     def _log_html(lines):
-        body = html.escape("\n".join(lines))
-        return (
-            "<pre style='margin:0; padding:6px; white-space:pre-wrap; "
-            "word-break:break-word; overflow-wrap:anywhere; "
-            "height:100%; max-height:360px; overflow-y:auto; "
-            "box-sizing:border-box; "
-            "background:#0f1117; color:#ddd; "
-            "font-family:monospace; font-size:12px; line-height:1.35;'>"
-            + body + "</pre>"
-        )
+        """Больше не используется — заменён на Output виджет.
+        Сохранён для обратной совместимости."""
+        body = "\n".join(lines)
+        return f"<pre style='margin:0;padding:6px;white-space:pre-wrap;font-family:monospace;font-size:12px;'>{body}</pre>"
 
     # ------------------------------------------------------------------
     # Лог: дешёвая запись в буфер из любого потока + троттлинг-перерисовка
@@ -277,7 +270,28 @@ class ComfyLauncher:
                 return
             self._log_dirty = False
             lines = list(self._log_lines)
-        self.log.value = self._log_html(lines)
+
+        if not lines:
+            return
+
+        # Если deque вытолкнул старые строки — перерисовываем всё
+        needs_redraw = (len(lines) < self._log_rendered) or (self._log_rendered == 0)
+
+        if needs_redraw:
+            self.log.clear_output(wait=True)
+            with self.log:
+                for line in lines:
+                    print(line, flush=True)
+            self._log_rendered = len(lines)
+            return
+
+        # Добавляем только новые строки — скролл не сбрасывается
+        new_lines = lines[self._log_rendered:]
+        if new_lines:
+            with self.log:
+                for line in new_lines:
+                    print(line, flush=True)
+            self._log_rendered = len(lines)
 
     def _log_flusher(self):
         """Раз в LOG_FLUSH_SEC перерисовывает виджет лога, если он изменился."""
