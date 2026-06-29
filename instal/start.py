@@ -21,7 +21,9 @@ start.py
 ================================================================
 """
 
+import importlib
 import os
+import shutil
 import sys
 
 # ----------------------------------------------------------------------
@@ -34,22 +36,25 @@ except NameError:
 sys.path.insert(0, _KE_DIR)
 
 # После git pull в той же сессии Jupyter старые .py файлы обновлены,
-# но sys.modules хранит закешированные старые модули (без import sys).
-# Выкидываем их — Python перечитает свежие .py при следующем импорте.
-_INSTAL_MODULES = [
-    "kaggle_env", "logging_ui", "launcher", "sage_installer",
-    "instal_comfyui", "instal_castom_node",
-]
-for _m in _INSTAL_MODULES:
-    if _m in sys.modules:
-        del sys.modules[_m]
+# но sys.modules хранит закешированные старые модули.
+# Выкидываем все instal-модули — Python перечитает свежие .py.
+for _mod_name in list(sys.modules.keys()):
+    if _mod_name in (
+        "kaggle_env", "logging_ui", "launcher", "sage_installer",
+        "instal_comfyui", "instal_castom_node",
+    ):
+        del sys.modules[_mod_name]
 
-# Заодно чистим __pycache__ — от stale .pyc (кэш переживает git pull
-# и Python может не перекомпилировать, если timestamp совпадает).
-_pycache = os.path.join(_KE_DIR, "__pycache__")
-if os.path.isdir(_pycache):
-    import shutil
-    shutil.rmtree(_pycache, ignore_errors=True)
+# Чистим все __pycache__ в instal/ рекурсивно — stale .pyc переживает
+# git pull, и Python может не перекомпилировать, если timestamp совпал.
+for _root, _dirs, _files in os.walk(_KE_DIR):
+    if "__pycache__" in _dirs:
+        shutil.rmtree(os.path.join(_root, "__pycache__"), ignore_errors=True)
+        _dirs.remove("__pycache__")  # не лезем внутрь удалённого
+
+# Инвалидируем кэш importlib finder'ов — чтобы они перечитали файлы
+# с диска, а не вернули stale spec из внутреннего кэша.
+importlib.invalidate_caches()
 
 import kaggle_env as ke
 
