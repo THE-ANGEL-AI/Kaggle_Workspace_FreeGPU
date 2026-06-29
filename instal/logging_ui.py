@@ -185,7 +185,8 @@ class LogManager:
             "<pre style='margin:0; padding:6px; white-space:pre-wrap; "
             "word-break:break-word; background:#0f1117; color:#ddd; "
             "font-family:monospace; font-size:12px; line-height:1.35; "
-            "min-height:100%;'>" + body + "</pre>"
+            "height:100%; overflow-y:auto; "
+            "max-height:348px; box-sizing:border-box;'>" + body + "</pre>"
         )
 
     # ------------------------------------------------------------------

@@ -56,7 +56,6 @@ CLOUDFLARED     = f"{HOME_DIR}/cloudflared"
 
 # Авто-обновление нод
 AUTO_UPDATE_NODES = True
-AUTO_UPDATE_NODE_REQS = False
 
 
 class ComfyLauncher:
@@ -138,7 +137,6 @@ class ComfyLauncher:
             self.logger.print(f"  ❌ Ошибка на {elapsed:.0f}с: {e}")
             self.logger.print(f"{'='*60}")
             self.logger.print(f"[ERROR] {e}\n{traceback.format_exc()}")
-            traceback.print_exc()
         finally:
             self._starting = False
 
@@ -275,6 +273,9 @@ class ComfyLauncher:
                 self.logger.print("  → venv пересоздан — устанавливаю torch")
                 self.logger.stream_script(INSTALLER, "INSTALL",
                     "Запусти вручную: !python instal/instal_comfyui.py")
+                self.logger.print("  → Переустанавливаю зависимости кастомных нод")
+                self.logger.stream_script(NODE_INSTALLER, "NODES",
+                    "Запусти вручную: !python instal/instal_castom_node.py")
         else:
             self.logger.print("  ✅ venv в порядке")
 
@@ -319,8 +320,12 @@ class ComfyLauncher:
             return None
 
     def _update_node(self, name, path):
-        """git pull одной ноды; при реальном обновлении — переустановка её
-        requirements в venv (иначе пропускаем)."""
+        """git pull одной ноды + переустановка ее requirements.txt в venv.
+
+        Всегда переустанавливает requirements.txt после pull — `uv pip install`
+        идемпотентен и быстр при Already up to date. Это гарантирует, что
+        зависимости нод не пропадут после пересоздания venv.
+        """
         res = subprocess.run(
             ["git", "-C", path, "pull", "--ff-only"],
             capture_output=True, text=True)
@@ -329,11 +334,10 @@ class ComfyLauncher:
             self.logger.print(f"[NODES] {name}: git pull не удался, пропуск — "
                         f"{out.splitlines()[-1] if out else 'нет вывода'}")
             return
-        if "Already up to date" in out or "Already up-to-date" in out:
-            return
-        self.logger.print(f"[NODES] {name}: обновлён код ↓")
-        if not AUTO_UPDATE_NODE_REQS:
-            return
+        if "Already up to date" not in out and "Already up-to-date" not in out:
+            self.logger.print(f"[NODES] {name}: обновлён код ↓")
+        # Всегда переустанавливаем requirements — если venv пересоздан,
+        # пакеты пропали, а `uv pip install` идемпотентен.
         req = os.path.join(path, "requirements.txt")
         if os.path.exists(req):
             subprocess.run(
