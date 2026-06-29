@@ -6,11 +6,14 @@ logging_ui.py
 UI-обвязка и система логирования для ComfyUI на Kaggle.
 
 Архитектура (выстрадана на Kaggle):
-  * Раньше лог был widgets.HTML с буфером и флешером — скролл
-    улетал наверх при каждом обновлении, JS-фиксы не работали.
-  * Сейчас — widgets.Output. append_stdout() идёт через iopub,
-    frontend сам добавляет строку и сохраняет скролл.
-  * Статус, heartbeat, URL — widgets.HTML (те же преимущества).
+  * Лог — widgets.HTML с <pre> и overflow-y:auto.
+    Без JS. Без append_stdout. Без авто-скролла.
+    Браузерное scroll anchoring:
+      - пользователь внизу → новые строки видны (content stays at bottom)
+      - пользователь читает выше → скролл НЕ дёргается
+  * Буфер + флешер (раз в 0.5с) — батчим строки, чтобы не слать
+    полный лог на каждый чих.
+  * Статус, heartbeat, URL — widgets.HTML.
   * Кнопки — widgets.Button с on_click.
   * Keep-alive: фоновые потоки (_heartbeat_loop, _stdout_keep_alive).
 =================================================================
@@ -22,6 +25,7 @@ import re
 import subprocess
 import sys
 import time
+from collections import deque
 from datetime import datetime
 from threading import Lock, Thread
 
@@ -32,20 +36,54 @@ from IPython.display import display
 # ----------------------------------------------------------------------
 # Настройки лога
 # ----------------------------------------------------------------------
+LOG_MAX_LINES = 2000     # сколько последних строк держим в буфере
+LOG_FLUSH_SEC = 0.5      # как часто сбрасываем батч в HTML-виджет
+
 LOG_FILE_PATH = "/kaggle/working/comfyui_launcher.log"
+
+
+_LONG_LOG_STUB = (
+    "<div style='font-style:italic; color:#888; padding:8px;'>"
+    "Лог появится после запуска...</div>"
+)
+
+
+# ----------------------------------------------------------------------
+# Внутренний HTML-шаблон для лога
+# ----------------------------------------------------------------------
+def _log_html_body(text):
+    """Возвращает HTML для одного <pre>, заполняющего контейнер."""
+    return (
+        "<pre style='margin:0;padding:8px;"
+        "background:#1e1e1e;color:#d4d4d4;"
+        "font-family:monospace;font-size:13px;"
+        "white-space:pre-wrap;word-wrap:break-word;'>"
+        f"{text}</pre>"
+    )
 
 
 class LogManager:
     """Собирает логи из всех потоков и рисует панель управления.
 
-    Лог — widgets.Output. append_stdout() отправляет текст через iopub
-    на frontend, который сам добавляет строку и сохраняет скролл внизу
-    (механизм Output). Не требует pump, потокобезопасен.
+    Лог — widgets.HTML + <pre>. Строки накапливаются в буфере (deque)
+    и сбрасываются батчем раз в 0.5с.
+
+    Scroll anchoring:
+      Браузер сам управляет скроллом прокручиваемого контейнера.
+      Если пользователь внизу — новые строки смещают старые вверх,
+      скролл остаётся внизу (читатель видит последние строки).
+      Если пользователь прокрутил вверх — скролл НЕ дёргается,
+      контент под viewport'ом не сдвигается.
     """
 
     _ANSI_RE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
     def __init__(self):
+        # Буфер лога
+        self._log_lines = deque(maxlen=LOG_MAX_LINES)
+        self._log_lock = Lock()
+        self._log_dirty = False
+
         self.stopped = False
 
         # Callback'и для кнопок (устанавливаются из launcher.py)
@@ -57,6 +95,9 @@ class LogManager:
 
         # Строим панель
         self._build_ui()
+
+        # Флешер — раз в 0.5с сбрасывает буфер в HTML-виджет
+        Thread(target=self._log_flusher, daemon=True).start()
 
     # ------------------------------------------------------------------
     # Persistent-лог в файл
@@ -116,10 +157,11 @@ class LogManager:
         # Ряд кнопок
         self.controls = widgets.HBox([self.url_box, self.stop_btn, self.restart_btn])
 
-        # Лог — widgets.Output. append_stdout() отправляет на frontend
-        # через iopub. Frontend сам добавляет строки и сохраняет скролл
-        # внизу — не требует pump и не сбрасывает позицию.
-        self.log_output = widgets.Output(
+        # Лог — widgets.HTML с <pre>.
+        # Внешний контейнер — scrollable div (overflow:auto + height:360px).
+        # Браузерное scroll anchoring работает без JS.
+        self.log_output = widgets.HTML(
+            value=_LONG_LOG_STUB,
             layout=widgets.Layout(
                 border="1px solid #444", height="360px",
                 overflow="auto",
@@ -237,17 +279,19 @@ class LogManager:
             print(f"💓 [{now}] ComfyUI активен, ожидание запроса...", flush=True)
 
     # ------------------------------------------------------------------
-    # Лог: append_stdout напрямую на frontend
+    # Лог: буфер + батчевый сброс в HTML-виджет
     # ------------------------------------------------------------------
     @staticmethod
     def _strip_ansi(text):
         return LogManager._ANSI_RE.sub('', text)
 
     def print(self, text):
-        """Отправляет строки в Output-виджет (+ persistent-файл).
+        """Кладёт строки в буфер. Флешер сбрасывает батч в HTML раз в 0.5с.
 
-        append_stdout идёт через iopub — frontend добавляет строку
-        и сохраняет скролл автоматически. Потокобезопасно.
+        Батчинг + HTML-виджет:
+          - не триггерит авто-скролл frontend'а (как Output.append_stdout)
+          - браузерное scroll anchoring сохраняет позицию пользователя
+          - html.escape() защищает от некорректного HTML в логах
         """
         for raw in str(text).split("\n"):
             seg = raw.split("\r")[-1].rstrip()
@@ -256,14 +300,46 @@ class LogManager:
             seg = self._strip_ansi(seg)
             if not seg:
                 continue
-            # В Output-виджет (iopub → frontend, скролл сохраняется)
-            self.log_output.append_stdout(seg + "\n")
-            # В persistent-файл
-            if self._log_file:
-                try:
-                    self._log_file.write(f"{seg}\n")
-                except OSError:
-                    pass
+            with self._log_lock:
+                self._log_lines.append(seg)
+                self._log_dirty = True
+                if self._log_file:
+                    try:
+                        self._log_file.write(f"{seg}\n")
+                    except OSError:
+                        pass
+
+    def _flush_log_now(self):
+        """Сбрасывает буфер в HTML-виджет.
+
+        Безопасный порядок:
+          1. Копируем lines под lock'ом
+          2. Снимаем lock
+          3. Шлём в виджет
+        Никаких .clear() — deque сам дропает старые записи по maxlen.
+        """
+        with self._log_lock:
+            if not self._log_dirty:
+                return
+            self._log_dirty = False
+            lines = list(self._log_lines)
+        if lines:
+            safe = "\n".join(html.escape(l) for l in lines)
+            try:
+                self.log_output.value = _log_html_body(safe)
+                if self._log_file:
+                    self._log_file.flush()
+            except Exception:
+                pass
+
+    def _log_flusher(self):
+        """Раз в 0.5с сбрасывает буфер в HTML-виджет."""
+        while not self.stopped:
+            time.sleep(LOG_FLUSH_SEC)
+            try:
+                self._flush_log_now()
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Захват stdout процесса -> лог
@@ -325,6 +401,10 @@ class LogManager:
     # Завершение
     # ------------------------------------------------------------------
     def flush_now(self):
+        try:
+            self._flush_log_now()
+        except Exception:
+            pass
         if self._log_file:
             try:
                 self._log_file.flush()
