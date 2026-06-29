@@ -98,13 +98,11 @@ def install_torch():
             extra_args=["--index-url", TORCH_INDEX],
         )
 
-    # nvidia-ml-py — подавляет FutureWarning от torch 2.11:
-    #   "The pynvml package is deprecated. Please install nvidia-ml-py instead."
-    # Torch сначала пробует import nvidia_ml_py, если не находит — pynvml с warning.
-    # Удаляем pynvml, чтобы torch гарантированно взял новую библиотеку.
+    # nvidia-ml-py — torch импортирует pynvml (модуль из nvidia-ml-py).
+    # Ставим сразу, чтобы torch.cuda не споткнулся.
     uv_pip_install("nvidia-ml-py")
-    run(["uv", "pip", "uninstall", "--python", VENV_PYTHON, "-q", "pynvml"],
-        check=False)
+    # NB: pynvml-редиректор НЕ удаляем здесь — он может переустановиться
+    # при установке ComfyUI/нод. Финальная зачистка в main().
 
     # Проверяем, что torch видит CUDA — сразу ловим проблему, не на запуске.
     run([VENV_PYTHON, "-c",
@@ -175,6 +173,14 @@ def main():
     install_comfyui()
     install_manager()
     install_common_extras()
+
+    # Финальная зачистка pynvml-редиректора ПОСЛЕ всех установок.
+    # Если какой-то requirements.txt тянет pynvml как зависимость,
+    # он ставится обратно. Только финальный uninstall гарантирует
+    # чистоту перед запуском ComfyUI.
+    uv_pip_install("nvidia-ml-py")
+    run(["uv", "pip", "uninstall", "--python", VENV_PYTHON, "-q", "pynvml"],
+        check=False)
 
     log("ГОТОВО. ComfyUI установлен. Теперь запусти: !python instal/instal_castom_node.py")
 

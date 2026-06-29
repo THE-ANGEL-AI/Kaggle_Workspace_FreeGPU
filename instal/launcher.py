@@ -301,13 +301,12 @@ class ComfyLauncher:
         else:
             self.logger.print("  ✅ torch/CUDA в порядке")
 
-        # --- nvidia-ml-py (подавление pynvml FutureWarning от torch 2.11) ---
-        self._ensure_nvidia_ml_py()
-
-        # --- Кастомные ноды ---
+        # --- Кастомные ноды (могут притянуть pynvml в requirements.txt) ---
         self._check_nodes()
         # --- Симлинки на модели (всегда, независимо от состояния нод) ---
         self._ensure_symlinks()
+        # --- nvidia-ml-py (ФИНАЛ после всех установок — удаляем pynvml-редиректор) ---
+        self._ensure_nvidia_ml_py()
         self._log_elapsed(t0)
 
     # --- 2b. проверка и авто-обновление кастомных нод ---
