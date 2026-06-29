@@ -43,22 +43,31 @@ LOG_FILE_PATH = "/kaggle/working/comfyui_launcher.log"
 
 
 _LONG_LOG_STUB = (
-    "<div style='font-style:italic; color:#888; padding:8px;'>"
-    "Лог появится после запуска...</div>"
+    "<div style='overflow-y:auto;height:100%;'>"
+    "<div style='font-style:italic;color:#888;padding:8px;'>"
+    "Лог появится после запуска...</div></div>"
 )
 
 
 # ----------------------------------------------------------------------
 # Внутренний HTML-шаблон для лога
 # ----------------------------------------------------------------------
-def _log_html_body(text):
-    """Возвращает HTML для одного <pre>, заполняющего контейнер."""
+def _log_html_full(text):
+    """Возвращает HTML с scrollable wrapper div и <pre> внутри.
+
+    height:100% + overflow-y:auto на wrapper'е — скролл живёт в HTML,
+    а не в layout виджета. После перезапуска Kaggle-сессии layout может
+    не восстановиться, но HTML каждый раз пишется свежим — скролл
+    всегда работает.
+    """
     return (
+        "<div style='overflow-y:auto;height:100%;'>"
         "<pre style='margin:0;padding:8px;"
         "background:#1e1e1e;color:#d4d4d4;"
         "font-family:monospace;font-size:13px;"
         "white-space:pre-wrap;word-wrap:break-word;'>"
         f"{text}</pre>"
+        "</div>"
     )
 
 
@@ -157,14 +166,15 @@ class LogManager:
         # Ряд кнопок
         self.controls = widgets.HBox([self.url_box, self.stop_btn, self.restart_btn])
 
-        # Лог — widgets.HTML с <pre>.
-        # Внешний контейнер — scrollable div (overflow:auto + height:360px).
-        # Браузерное scroll anchoring работает без JS.
+        # Лог — widgets.HTML с <pre> внутри scrollable wrapper-div.
+        # Скролл (overflow-y:auto) — в HTML-значении, не в layout.
+        # После перезапуска Kaggle-сессии layout может не восстановиться,
+        # но HTML пишется свежим каждый флеш — скролл не ломается.
         self.log_output = widgets.HTML(
             value=_LONG_LOG_STUB,
             layout=widgets.Layout(
                 border="1px solid #444", height="360px",
-                overflow="auto",
+                overflow="hidden",
             ),
         )
 
@@ -326,7 +336,7 @@ class LogManager:
         if lines:
             safe = "\n".join(html.escape(l) for l in lines)
             try:
-                self.log_output.value = _log_html_body(safe)
+                self.log_output.value = _log_html_full(safe)
                 if self._log_file:
                     self._log_file.flush()
             except Exception:
