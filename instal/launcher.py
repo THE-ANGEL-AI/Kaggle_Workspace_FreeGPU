@@ -505,6 +505,7 @@ class ComfyLauncher:
             "--enable-cors-header", "*",
             "--disable-auto-launch",
             "--preview-method", "auto",
+            "--gpu-only",
             # Без флага attention — ComfyUI использует torch SDPA (на torch 2+).
             # Раньше был --use-split-cross-attention, но на втором проходе
             # 720p видео вылетает OOM. SDPA эффективнее по памяти на T4.
