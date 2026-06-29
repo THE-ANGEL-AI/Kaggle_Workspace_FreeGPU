@@ -156,6 +156,29 @@ class LogManager:
         # Показываем панель
         display(self.panel)
 
+        # Скрипт auto-scroll лога: при появлении новых строк скроллит вниз,
+        # если пользователь не прокрутил вверх. MutationObserver следит за
+        # #__comfy_log__ и при изменении контента проверяет позицию скролла.
+        try:
+            from IPython.display import Javascript
+            display(Javascript("""
+            (function(){
+                var el = document.getElementById('__comfy_log__');
+                if (!el) { setTimeout(arguments.callee, 200); return; }
+                var observer = new MutationObserver(function(){
+                    var pre = el.querySelector('pre');
+                    if (!pre) return;
+                    setTimeout(function(){
+                        var atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 40;
+                        if (atBottom) pre.scrollTop = pre.scrollHeight;
+                    }, 0);
+                });
+                observer.observe(el, {childList:true, subtree:true, characterData:true});
+            })();
+            """))
+        except Exception:
+            pass
+
     # ------------------------------------------------------------------
     # HTML-генераторы
     # ------------------------------------------------------------------
@@ -179,14 +202,20 @@ class LogManager:
 
     @staticmethod
     def _log_html(lines):
-        """Собирает HTML для виджета лога."""
+        """Собирает HTML для виджета лога.
+
+        Оборачивает pre в div#__comfy_log__ — MutationObserver в _build_ui()
+        находит его и управляет auto-scroll при добавлении новых строк.
+        """
         body = html.escape("\n".join(lines))
         return (
+            "<div id='__comfy_log__' style='height:100%;'>"
             "<pre style='margin:0; padding:6px; white-space:pre-wrap; "
             "word-break:break-word; background:#0f1117; color:#ddd; "
             "font-family:monospace; font-size:12px; line-height:1.35; "
             "height:100%; overflow-y:auto; "
             "max-height:348px; box-sizing:border-box;'>" + body + "</pre>"
+            "</div>"
         )
 
     # ------------------------------------------------------------------
