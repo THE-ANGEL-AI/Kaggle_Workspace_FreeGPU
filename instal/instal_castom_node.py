@@ -51,6 +51,8 @@ CUSTOM_NODES = {
     "ComfyUI_FL-CosyVoice3": "https://github.com/filliptm/ComfyUI_FL-CosyVoice3.git",
     # Ltx 2.3 Director
     "WhatDreamsCost-ComfyUI": "https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI.git",
+    # LTX2 MultiGPU — распределение генерации видео на несколько GPU
+    "ComfyUI-LTX2-MultiGPU": "https://github.com/dreamfast/ComfyUI-LTX2-MultiGPU.git",
 }
 
 # ----------------------------------------------------------------------
