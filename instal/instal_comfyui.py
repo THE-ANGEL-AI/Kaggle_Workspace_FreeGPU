@@ -94,7 +94,7 @@ def install_torch():
         log("torch с рабочей CUDA уже установлен (переустановка пропущена)")
     else:
         uv_pip_install(
-            "torch", "torchvision", "torchaudio",
+            "torch==2.11.0", "torchvision==0.26.0", "torchaudio==2.11.0",
             extra_args=["--index-url", TORCH_INDEX],
         )
 
