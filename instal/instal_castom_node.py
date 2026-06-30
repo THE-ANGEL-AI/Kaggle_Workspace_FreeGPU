@@ -82,6 +82,9 @@ SYMLINKS = [
     ("/kaggle/input/models/theangel/ltx-2-3/other/default/6/ltx2.3_text_encoder_projection-q8_0.gguf",
      f"{COMFY_DIR}/models/text_encoders/ltx2.3_text_encoder_projection-q8_0.gguf"),
 
+    ("/kaggle/input/models/theangel/ltx-2-3/other/default/6/ltx-2.3_text_projection_bf16.safetensors",
+     f"{COMFY_DIR}/models/text_encoders/ltx-2.3_text_projection_bf16.safetensors"),
+
     ("/kaggle/input/models/theangel/ltx-2-3/other/default/6/LTX23_audio_vae_bf16.safetensors",
      f"{COMFY_DIR}/models/vae/LTX23_audio_vae_bf16.safetensors"),
 
