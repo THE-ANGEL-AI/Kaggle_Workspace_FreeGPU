@@ -37,10 +37,33 @@ except NameError:
 sys.path.insert(0, _KE_DIR)
 
 # ----------------------------------------------------------------------
-# 1. git pull — обновляем код из репозитория
+# 0a. Константы репозитория
+# ----------------------------------------------------------------------
+# В тестовом блокноте используй эту команду для clone:
+#   git clone -b develop https://github.com/THE-ANGEL-AI/Kaggle_Workspace_FreeGPU.git
+_REPO_CLONE_URL = "https://github.com/THE-ANGEL-AI/Kaggle_Workspace_FreeGPU.git"
+_DEV_BRANCH = "develop"
+
+# ----------------------------------------------------------------------
+# 1. git pull — обновляем код из репозитория с ветки develop
 #    Выполняется ДО очистки кэша, чтобы свежие файлы уже были на диске.
 # ----------------------------------------------------------------------
 try:
+    # 1a. Проверяем текущую ветку — если не develop, переключаемся
+    _branch = subprocess.run(
+        ["git", "-C", _KE_DIR, "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True, text=True, timeout=10,
+    )
+    _current_branch = _branch.stdout.strip()
+    if _current_branch and _current_branch != _DEV_BRANCH:
+        print(f"⚙️ [start] Переключение {_current_branch} → {_DEV_BRANCH}...")
+        subprocess.run(
+            ["git", "-C", _KE_DIR, "checkout", _DEV_BRANCH],
+            capture_output=True, text=True, timeout=15,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        )
+
+    # 1b. Pull с переbase на develop
     _r = subprocess.run(
         ["git", "-C", _KE_DIR, "pull", "--ff-only"],
         capture_output=True, text=True, timeout=30,
