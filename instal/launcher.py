@@ -366,9 +366,21 @@ class ComfyLauncher:
         # пакеты пропали, а `uv pip install` идемпотентен.
         req = os.path.join(path, "requirements.txt")
         if os.path.exists(req):
-            subprocess.run(
+            # Показываем зависимости и результат установки
+            try:
+                with open(req) as _f:
+                    _deps = [l.strip() for l in _f if l.strip() and not l.startswith("#")]
+                if _deps:
+                    self.logger.print(f"  → {name} зависимости: {', '.join(_deps)}")
+            except OSError:
+                pass
+            _r = subprocess.run(
                 ["uv", "pip", "install", "--python", VENV_PYTHON, "-r", req],
                 capture_output=True, text=True)
+            if _r.returncode == 0:
+                self.logger.print(f"  → {name}: зависимости установлены")
+            else:
+                self.logger.print(f"  → {name}: ошибка установки зависимостей: {_r.stderr.strip()[:200]}")
 
     def _update_existing_nodes(self, names):
         """Обновляет (git pull) все ноды из списка, которые уже на диске."""

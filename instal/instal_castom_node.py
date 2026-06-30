@@ -111,11 +111,20 @@ SYMLINKS = [
 ]
 
 
-def uv_pip_install_req(req_path):
+def uv_pip_install_req(req_path, node_name=""):
     """Ставит requirements ноды в наш venv через uv."""
+    prefix = f" [{node_name}]" if node_name else ""
+    # Показываем, какие зависимости будем ставить
+    try:
+        with open(req_path) as _f:
+            _deps = [l.strip() for l in _f if l.strip() and not l.startswith("#")]
+        if _deps:
+            log(f"Зависимости{prefix}: {', '.join(_deps)}")
+    except OSError:
+        pass
     result = run(["uv", "pip", "install", "--python", VENV_PYTHON, "-r", req_path], check=False)
     if result and result.returncode != 0:
-        warn(f"Установка requirements ноды не удалась: {req_path}")
+        warn(f"Установка requirements ноды не удалась{prefix}: {req_path}")
 
 
 def check_prerequisites():
@@ -152,7 +161,7 @@ def install_node(name, repo):
 
     req = os.path.join(target, "requirements.txt")
     if os.path.exists(req):
-        uv_pip_install_req(req)
+        uv_pip_install_req(req, node_name=name)
     log(f"Нода готова: {name}")
 
 
