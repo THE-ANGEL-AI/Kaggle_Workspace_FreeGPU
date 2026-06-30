@@ -334,11 +334,28 @@ def ensure_venv():
         # для следующего шага. Продолжаем с пересозданием venv.
 
     ensure_uv()  # для пересоздания нужен uv
-    # --seed кладёт pip/setuptools внутрь venv — некоторым нодам это нужно.
     # --clear молча перезаписывает существующую папку (без вопроса «очистить?»).
-    run(["uv", "venv", VENV_DIR, "--python", PYTHON_VERSION, "--seed", "--clear"])
+    # --seed НЕ используем: в новых uv (≥0.9) deprecated, выдаёт warning.
+    # Вместо этого ставим pip/setuptools отдельно через uv pip install.
+    run(["uv", "venv", VENV_DIR, "--python", PYTHON_VERSION, "--clear"])
     if not venv_python_ok():
         raise RuntimeError("venv создан, но python не запускается — смотри лог выше")
+    # Ставим seed-пакеты (pip, setuptools) — то же самое, что --seed, но без warning
+    _seed = subprocess.run(
+        ["uv", "pip", "install", "--python", VENV_PYTHON, "pip", "setuptools"],
+        capture_output=True, text=True, timeout=60,
+    )
+    if _seed.returncode == 0:
+        # Вытаскиваем версию pip из вывода (красиво)
+        for _line in _seed.stdout.splitlines():
+            _line = _line.strip()
+            if "pip" in _line and "setuptools" not in _line:
+                log(f"  + {_line}")
+                break
+        else:
+            log(f"  + pip, setuptools установлены")
+    else:
+        warn(f"seed-пакеты: {_seed.stderr.strip()[:200]}")
     log(f"venv создан на Python {PYTHON_VERSION}: {VENV_DIR}")
     return False
 
